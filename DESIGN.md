@@ -212,12 +212,12 @@ Triagent.sln
 - Posting labels or comments back to GitHub (we may add `--apply-labels` later)
 - Scoring PRs themselves
 - Pricing/cost tracking per analyze run
-- Re-scoring on label-only changes (we trigger on any `updated_at` bump for simplicity)
+- Built-in `--watch` mode — use cron for now (tracked in issue #1)
+- Content-hash based re-scoring to skip label-only bumps (tracked in issue #2)
 
-## Open questions
+## Settled defaults
 
-1. Should we also score private repos by default, or require `--include-private`?
-2. Do we want a `triagent watch` mode that polls a repo on an interval, or is
-   running `analyze` from cron enough?
-3. Worth adding a content hash so pure label-bumps don't trigger re-scoring? Probably
-   yes once we're running this often — defer until it actually costs us.
+- **Private repos** — scored without any extra flag. If the user can see them via
+  their GitHub token, Triagent treats them like any other repo.
+- **Re-score trigger** — GitHub's `issue.updated_at` field. Simple and good enough;
+  noisy label edits will trigger a re-score until issue #2 lands.
