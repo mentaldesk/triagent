@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Build & test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Print SDK version
+        run: dotnet --info
+
+      - name: Restore
+        run: dotnet restore Triagent.sln
+
+      - name: Build
+        run: dotnet build Triagent.sln --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test Triagent.sln --configuration Release --no-build --logger "trx;LogFileName=test-results.trx" --logger "console;verbosity=normal"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: '**/test-results.trx'
+          if-no-files-found: ignore
