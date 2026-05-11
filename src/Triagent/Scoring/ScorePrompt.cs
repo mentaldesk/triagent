@@ -46,13 +46,14 @@ public static class ScorePrompt
           }
         ]
 
-        ISSUES:
-
         """;
 
     public static string Build(IReadOnlyList<IssueForScoring> batch)
     {
         var sb = new StringBuilder(Rubric);
+        sb.AppendLine(CalibrationExamples.Render());
+        sb.AppendLine("ISSUES:");
+        sb.AppendLine();
         foreach (var issue in batch)
         {
             sb.Append("--- ISSUE #").Append(issue.Number).AppendLine(" ---");
