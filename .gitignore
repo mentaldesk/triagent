@@ -1,0 +1,25 @@
+# .NET
+bin/
+obj/
+out/
+*.user
+*.suo
+.vs/
+.vscode/
+.idea/
+
+# Build artefacts
+*.dll
+*.pdb
+*.exe
+
+# Local DB / config
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+.triagent/
+
+# OS junk
+.DS_Store
+Thumbs.db
