@@ -79,25 +79,32 @@ public sealed partial class GitHubClient
 
     /// <summary>
     /// Returns the set of open issue numbers that have at least one open PR referencing
-    /// them via a "Closes/Fixes/Resolves #N" keyword in its body. This is a cheap
-    /// proxy for the official linked-PRs API, which only exists in GraphQL.
+    /// them via a "Closes/Fixes/Resolves #N" keyword in its body, across the provided
+    /// repositories. This is a cheap proxy for the official linked-PRs API, which only
+    /// exists in GraphQL.
     /// </summary>
     public async Task<HashSet<int>> GetIssuesLinkedToOpenPullRequestsAsync(
-        string owner, string repo, CancellationToken ct = default)
+        IReadOnlyList<(string Owner, string Repo)> repos,
+        CancellationToken ct = default)
     {
-        var prs = await _client.PullRequest.GetAllForRepository(owner, repo,
-            new PullRequestRequest { State = ItemStateFilter.Open },
-            new ApiOptions { PageSize = 100 });
-
         var linked = new HashSet<int>();
-        foreach (var pr in prs)
+
+        foreach (var (owner, repo) in repos)
         {
-            var body = pr.Body ?? "";
-            foreach (Match m in CloseKeywordRegex().Matches(body))
+            var prs = await _client.PullRequest.GetAllForRepository(owner, repo,
+                new PullRequestRequest { State = ItemStateFilter.Open },
+                new ApiOptions { PageSize = 100 });
+
+            foreach (var pr in prs)
             {
-                if (int.TryParse(m.Groups["n"].ValueSpan, out var n)) linked.Add(n);
+                var body = pr.Body ?? "";
+                foreach (Match m in CloseKeywordRegex().Matches(body))
+                {
+                    if (int.TryParse(m.Groups["n"].ValueSpan, out var n)) linked.Add(n);
+                }
             }
         }
+
         return linked;
     }
 

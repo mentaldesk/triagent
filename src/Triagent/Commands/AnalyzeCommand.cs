@@ -36,9 +36,10 @@ public static class AnalyzeCommand
             .StartAsync("Listing open issues...", _ => gh.GetAllOpenIssuesAsync(owner, repo, ct));
         AnsiConsole.MarkupLine($"  Found [cyan]{openIssues.Count}[/] open issues");
 
+        var prLinkRepos = ResolvePrLinkRepos(owner, repo, config.LinkedPrRepos);
         var linkedToOpenPrs = await AnsiConsole.Status()
-            .StartAsync("Checking open PRs for linked issues...",
-                _ => gh.GetIssuesLinkedToOpenPullRequestsAsync(owner, repo, ct));
+            .StartAsync($"Checking open PRs for linked issues across {prLinkRepos.Count} repo(s)...",
+                _ => gh.GetIssuesLinkedToOpenPullRequestsAsync(prLinkRepos, ct));
         AnsiConsole.MarkupLine($"  [cyan]{linkedToOpenPrs.Count}[/] issues linked from open PRs");
 
         // Snapshot current DB state for sync decisions
@@ -146,11 +147,38 @@ public static class AnalyzeCommand
         return issue.UpdatedAt > existing.LastScoredAt.Value;
     }
 
+    private static List<(string Owner, string Repo)> ResolvePrLinkRepos(
+        string owner,
+        string repo,
+        IReadOnlyList<string>? configured)
+    {
+        var target = (Owner: owner, Repo: repo);
+
+        if (configured is null || configured.Count == 0)
+            return new List<(string Owner, string Repo)> { target };
+
+        var resolved = new List<(string Owner, string Repo)>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var entry in configured)
+        {
+            if (string.IsNullOrWhiteSpace(entry)) continue;
+            var (o, r) = SplitRepo(entry.Trim());
+            var key = $"{o}/{r}";
+            if (seen.Add(key)) resolved.Add((o, r));
+        }
+
+        var targetKey = $"{owner}/{repo}";
+        if (seen.Add(targetKey)) resolved.Add(target);
+
+        return resolved;
+    }
+
     private static (string Owner, string Repo) SplitRepo(string ownerRepo)
     {
         var parts = ownerRepo.Split('/');
         if (parts.Length != 2 || parts.Any(string.IsNullOrWhiteSpace))
-            throw new ArgumentException($"--repo must be in the form owner/name, got '{ownerRepo}'");
+            throw new ArgumentException($"repo must be in the form owner/name, got '{ownerRepo}'");
         return (parts[0], parts[1]);
     }
 }

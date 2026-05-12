@@ -119,8 +119,9 @@ analyze --repo <owner/name> [--scorer claude|codex] [--force] [--batch-size 5]
    never delete rows — history is preserved for stats and re-analysis.
 3. **Detect PR linkage.** For each open issue, check whether a PR references it
    (closes/fixes/resolves keyword in an open PR body, OR a `cross-referenced` event
-   from a PR on the issue timeline). If linked, set `has_linked_pr=1` and skip
-   scoring. Surface count in the run summary.
+   from a PR on the issue timeline). Triagent scans the analyzed repo plus any
+   configured `linkedPrRepos` (owner/name values) for these references. If linked,
+   set `has_linked_pr=1` and skip scoring. Surface count in the run summary.
 4. **Decide what to score.** An issue needs scoring when:
    - It is not yet in the DB, OR
    - `github_updated_at > last_scored_at`, OR
@@ -160,11 +161,14 @@ Default `--repo` can be set in a config file so day-to-day commands don't need i
   "defaultScorer": "claude",
   "defaultModel": "sonnet",
   "batchSize": 5,
-  "dbPath": "~/.triagent/triagent.db"
+  "dbPath": "~/.triagent/triagent.db",
+  "linkedPrRepos": [
+    "getsentry/sentry-docs"
+  ]
 }
 ```
 
-Any setting can be overridden via CLI flags.
+Any setting can be overridden via CLI flags (except `linkedPrRepos`, which is currently config-only).
 
 ## Project layout
 
