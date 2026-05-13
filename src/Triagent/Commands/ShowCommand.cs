@@ -30,6 +30,8 @@ public static class ShowCommand
         grid.AddRow("[bold]State[/]", row.State);
         grid.AddRow("[bold]Labels[/]", Markup.Escape(row.Labels));
         grid.AddRow("[bold]Has linked PR[/]", row.HasLinkedPr.ToString());
+        grid.AddRow("[bold]Has assignees[/]", row.HasAssignees.ToString());
+        grid.AddRow("[bold]Assignees[/]", Markup.Escape(string.IsNullOrWhiteSpace(row.Assignees) ? "-" : row.Assignees));
         grid.AddRow("[bold]GitHub updated[/]", row.GitHubUpdatedAt.ToString("u"));
         grid.AddRow("[bold]Last scored[/]", row.LastScoredAt?.ToString("u") ?? "(never)");
         grid.AddRow("[bold]Scorer[/]", row.Scorer ?? "-");

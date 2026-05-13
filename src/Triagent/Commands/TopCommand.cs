@@ -12,11 +12,12 @@ public static class TopCommand
         string state,
         int? minScore,
         string? label,
+        bool excludeAssigned,
         TriagentConfig config,
         CancellationToken ct)
     {
         await using var db = await IssueDb.OpenAsync(config.ResolvedDbPath, ct);
-        var rows = await db.QueryTopAsync(repo, state, limit, minScore, label, ct);
+        var rows = await db.QueryTopAsync(repo, state, limit, minScore, label, excludeAssigned, ct);
 
         if (rows.Count == 0)
         {

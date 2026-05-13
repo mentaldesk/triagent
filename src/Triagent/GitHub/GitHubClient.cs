@@ -62,6 +62,8 @@ public sealed partial class GitHubClient
                 i.Title,
                 i.HtmlUrl,
                 string.Join(", ", i.Labels.Select(l => l.Name)),
+                i.Assignees.Count > 0,
+                string.Join(", ", i.Assignees.Select(a => a.Login)),
                 i.UpdatedAt ?? i.CreatedAt))
             .ToList();
     }
