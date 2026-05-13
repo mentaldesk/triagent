@@ -11,6 +11,13 @@ public sealed class TriagentConfig
     public int BatchSize { get; set; } = 5;
     public string DbPath { get; set; } = "~/.triagent/triagent.db";
 
+    /// <summary>
+    /// Repositories to scan for open PRs that link to issues in the analyzed repo.
+    /// Entries must be in owner/name form. If unset/empty, Triagent scans only the
+    /// analyzed repository.
+    /// </summary>
+    public List<string> LinkedPrRepos { get; set; } = new();
+
     [JsonIgnore]
     public string ResolvedDbPath => ExpandHome(DbPath);
 
