@@ -13,6 +13,8 @@ public sealed record IssueRow
     public string Labels { get; init; } = string.Empty;
     public required string State { get; init; }              // "open" | "closed"
     public bool HasLinkedPr { get; init; }
+    public bool HasAssignees { get; init; }
+    public string Assignees { get; init; } = string.Empty;
     public required DateTimeOffset GitHubUpdatedAt { get; init; }
     public DateTimeOffset? ClosedAt { get; init; }
     public DateTimeOffset? LastScoredAt { get; init; }
@@ -34,6 +36,8 @@ public sealed record GitHubIssueSummary(
     string Title,
     string Url,
     string Labels,
+    bool HasAssignees,
+    string Assignees,
     DateTimeOffset UpdatedAt);
 
 /// <summary>

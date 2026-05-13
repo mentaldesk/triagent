@@ -41,6 +41,8 @@ public sealed class IssueDb : IAsyncDisposable
               labels               TEXT    NOT NULL DEFAULT '',
               state                TEXT    NOT NULL,
               has_linked_pr        INTEGER NOT NULL DEFAULT 0,
+              has_assignees        INTEGER NOT NULL DEFAULT 0,
+              assignees            TEXT    NOT NULL DEFAULT '',
               github_updated_at    TEXT    NOT NULL,
               closed_at            TEXT,
               last_scored_at       TEXT,
@@ -62,6 +64,10 @@ public sealed class IssueDb : IAsyncDisposable
         await using var cmd = _connection.CreateCommand();
         cmd.CommandText = sql;
         await cmd.ExecuteNonQueryAsync(ct);
+
+        // Forward-compatible migration for DBs created before assignee tracking existed.
+        await EnsureColumnAsync("issues", "has_assignees", "INTEGER NOT NULL DEFAULT 0", ct);
+        await EnsureColumnAsync("issues", "assignees", "TEXT NOT NULL DEFAULT ''", ct);
     }
 
     /// <summary>
@@ -117,14 +123,16 @@ public sealed class IssueDb : IAsyncDisposable
     {
         await using var cmd = _connection.CreateCommand();
         cmd.CommandText = """
-            INSERT INTO issues (repo, number, title, url, labels, state, has_linked_pr, github_updated_at)
-            VALUES ($repo, $number, $title, $url, $labels, 'open', $hasLinkedPr, $updatedAt)
+            INSERT INTO issues (repo, number, title, url, labels, state, has_linked_pr, has_assignees, assignees, github_updated_at)
+            VALUES ($repo, $number, $title, $url, $labels, 'open', $hasLinkedPr, $hasAssignees, $assignees, $updatedAt)
             ON CONFLICT(repo, number) DO UPDATE SET
               title             = excluded.title,
               url               = excluded.url,
               labels            = excluded.labels,
               state             = 'open',
               has_linked_pr     = excluded.has_linked_pr,
+              has_assignees     = excluded.has_assignees,
+              assignees         = excluded.assignees,
               github_updated_at = excluded.github_updated_at,
               closed_at         = NULL
             """;
@@ -134,6 +142,8 @@ public sealed class IssueDb : IAsyncDisposable
         cmd.Parameters.AddWithValue("$url", summary.Url);
         cmd.Parameters.AddWithValue("$labels", summary.Labels);
         cmd.Parameters.AddWithValue("$hasLinkedPr", hasLinkedPr ? 1 : 0);
+        cmd.Parameters.AddWithValue("$hasAssignees", summary.HasAssignees ? 1 : 0);
+        cmd.Parameters.AddWithValue("$assignees", summary.Assignees);
         cmd.Parameters.AddWithValue("$updatedAt", summary.UpdatedAt.ToString(DateFormat, CultureInfo.InvariantCulture));
         await cmd.ExecuteNonQueryAsync(ct);
     }
@@ -205,6 +215,7 @@ public sealed class IssueDb : IAsyncDisposable
         int limit,
         int? minTotal = null,
         string? labelContains = null,
+        bool excludeAssigned = false,
         CancellationToken ct = default)
     {
         var sql = "SELECT * FROM issues WHERE total IS NOT NULL";
@@ -212,6 +223,7 @@ public sealed class IssueDb : IAsyncDisposable
         if (repo is not null) sql += " AND repo = $repo";
         if (minTotal is not null) sql += " AND total >= $minTotal";
         if (labelContains is not null) sql += " AND labels LIKE $labelLike";
+        if (excludeAssigned) sql += " AND has_assignees = 0";
         sql += " AND has_linked_pr = 0 ORDER BY total DESC, number DESC LIMIT $limit";
 
         await using var cmd = _connection.CreateCommand();
@@ -272,6 +284,8 @@ public sealed class IssueDb : IAsyncDisposable
             Labels = r.GetString(r.GetOrdinal("labels")),
             State = r.GetString(r.GetOrdinal("state")),
             HasLinkedPr = r.GetInt32(r.GetOrdinal("has_linked_pr")) != 0,
+            HasAssignees = r.GetInt32(r.GetOrdinal("has_assignees")) != 0,
+            Assignees = r.GetString(r.GetOrdinal("assignees")),
             GitHubUpdatedAt = ParseDate(r.GetString(r.GetOrdinal("github_updated_at"))),
             ClosedAt = GetNullableDate(r, "closed_at"),
             LastScoredAt = GetNullableDate(r, "last_scored_at"),
@@ -288,6 +302,22 @@ public sealed class IssueDb : IAsyncDisposable
 
     private static DateTimeOffset ParseDate(string s) =>
         DateTimeOffset.Parse(s, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
+
+    private async Task EnsureColumnAsync(string table, string column, string sqlType, CancellationToken ct)
+    {
+        await using var check = _connection.CreateCommand();
+        check.CommandText = $"PRAGMA table_info({table})";
+        await using var reader = await check.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            if (string.Equals(reader.GetString(1), column, StringComparison.OrdinalIgnoreCase))
+                return;
+        }
+
+        await using var alter = _connection.CreateCommand();
+        alter.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} {sqlType}";
+        await alter.ExecuteNonQueryAsync(ct);
+    }
 
     private static DateTimeOffset? GetNullableDate(SqliteDataReader r, string name)
     {
