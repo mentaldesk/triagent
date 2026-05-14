@@ -1,50 +1,54 @@
+using Terminal.Gui.App;
 using Terminal.Gui.Drivers;
 using Terminal.Gui.Input;
 using Terminal.Gui.Testing;
 using Triagent.Commands;
-using Triagent.Config;
-using Triagent.Data;
 using Triagent.Models;
+using Triagent.Tests.Support;
 using Xunit;
 
 namespace Triagent.Tests.Commands;
 
 public sealed class ReviewCommandUiTests
 {
+    private const string Repo = "getsentry/sentry-dotnet";
+
     [Fact]
     public async Task CtrlQ_quits_review_ui()
     {
-        var dbPath = TempDbPath();
-        var config = new TriagentConfig { DbPath = dbPath, DefaultRepo = "getsentry/sentry-dotnet" };
+        await using var temp = new TempDb();
+        var config = temp.MakeConfig(defaultRepo: Repo);
 
-        await SeedIssueAsync(config, "getsentry/sentry-dotnet", 5058, scored: true);
+        await SeedIssueAsync(temp, 5058);
 
+        var iterationCount = 0;
         await ReviewCommand.RunAsync(
-            repo: "getsentry/sentry-dotnet",
+            repo: Repo,
             config,
             onAppReady: app =>
             {
                 app.Iteration += (_, _) =>
                 {
+                    iterationCount++;
                     if (Key.TryParse("Ctrl+Q", out var quit))
                         app.InjectKey(quit);
                 };
             },
             ct: CancellationToken.None);
 
-        Assert.True(true); // completed without hanging
+        Assert.True(iterationCount > 0, "UI never received an Iteration event — key was not injected");
     }
 
     [Fact]
     public async Task T_marks_selected_issue_as_try()
     {
-        var dbPath = TempDbPath();
-        var config = new TriagentConfig { DbPath = dbPath, DefaultRepo = "getsentry/sentry-dotnet" };
+        await using var temp = new TempDb();
+        var config = temp.MakeConfig(defaultRepo: Repo);
 
-        await SeedIssueAsync(config, "getsentry/sentry-dotnet", 5058, scored: true);
+        await SeedIssueAsync(temp, 5058);
 
         await ReviewCommand.RunAsync(
-            repo: "getsentry/sentry-dotnet",
+            repo: Repo,
             config,
             onAppReady: app =>
             {
@@ -64,8 +68,8 @@ public sealed class ReviewCommandUiTests
             },
             ct: CancellationToken.None);
 
-        await using var db = await IssueDb.OpenAsync(config.ResolvedDbPath);
-        var row = await db.GetAsync("getsentry/sentry-dotnet", 5058);
+        await using var db = await temp.OpenAsync();
+        var row = await db.GetAsync(Repo, 5058);
         Assert.NotNull(row);
         Assert.Equal(ReviewDecision.Try, row!.ReviewDecision);
     }
@@ -73,15 +77,15 @@ public sealed class ReviewCommandUiTests
     [Fact]
     public async Task U_reverts_selected_issue_to_unreviewed()
     {
-        var dbPath = TempDbPath();
-        var config = new TriagentConfig { DbPath = dbPath, DefaultRepo = "getsentry/sentry-dotnet" };
+        await using var temp = new TempDb();
+        var config = temp.MakeConfig(defaultRepo: Repo);
 
-        await SeedIssueAsync(config, "getsentry/sentry-dotnet", 5058, scored: true);
-        await using (var db = await IssueDb.OpenAsync(config.ResolvedDbPath))
-            await db.SaveReviewDecisionAsync("getsentry/sentry-dotnet", 5058, ReviewDecision.Skip, "temp");
+        await SeedIssueAsync(temp, 5058);
+        await using (var db = await temp.OpenAsync())
+            await db.SaveReviewDecisionAsync(Repo, 5058, ReviewDecision.Skip, "temp");
 
         await ReviewCommand.RunAsync(
-            repo: "getsentry/sentry-dotnet",
+            repo: Repo,
             config,
             onAppReady: app =>
             {
@@ -101,26 +105,25 @@ public sealed class ReviewCommandUiTests
             },
             ct: CancellationToken.None);
 
-        await using var db2 = await IssueDb.OpenAsync(config.ResolvedDbPath);
-        var row = await db2.GetAsync("getsentry/sentry-dotnet", 5058);
+        await using var db2 = await temp.OpenAsync();
+        var row = await db2.GetAsync(Repo, 5058);
         Assert.NotNull(row);
         Assert.Equal(ReviewDecision.None, row!.ReviewDecision);
         Assert.Null(row.ReviewReason);
     }
 
-
     [Fact]
     public async Task S_then_enter_confirms_skip_when_reason_already_present()
     {
-        var dbPath = TempDbPath();
-        var config = new TriagentConfig { DbPath = dbPath, DefaultRepo = "getsentry/sentry-dotnet" };
+        await using var temp = new TempDb();
+        var config = temp.MakeConfig(defaultRepo: Repo);
 
-        await SeedIssueAsync(config, "getsentry/sentry-dotnet", 5058, scored: true);
-        await using (var db = await IssueDb.OpenAsync(config.ResolvedDbPath))
-            await db.SaveReviewDecisionAsync("getsentry/sentry-dotnet", 5058, ReviewDecision.Skip, "already has reason");
+        await SeedIssueAsync(temp, 5058);
+        await using (var db = await temp.OpenAsync())
+            await db.SaveReviewDecisionAsync(Repo, 5058, ReviewDecision.Skip, "already has reason");
 
         await ReviewCommand.RunAsync(
-            repo: "getsentry/sentry-dotnet",
+            repo: Repo,
             config,
             onAppReady: app =>
             {
@@ -143,8 +146,8 @@ public sealed class ReviewCommandUiTests
             },
             ct: CancellationToken.None);
 
-        await using var db2 = await IssueDb.OpenAsync(config.ResolvedDbPath);
-        var row = await db2.GetAsync("getsentry/sentry-dotnet", 5058);
+        await using var db2 = await temp.OpenAsync();
+        var row = await db2.GetAsync(Repo, 5058);
         Assert.NotNull(row);
         Assert.Equal(ReviewDecision.Skip, row!.ReviewDecision);
         Assert.Equal("already has reason", row.ReviewReason);
@@ -153,17 +156,19 @@ public sealed class ReviewCommandUiTests
     [Fact]
     public async Task CtrlU_and_CtrlS_filters_do_not_mutate_decisions()
     {
-        var dbPath = TempDbPath();
-        var config = new TriagentConfig { DbPath = dbPath, DefaultRepo = "getsentry/sentry-dotnet" };
+        await using var temp = new TempDb();
+        using var configFile = new TempConfigFile();
+        var config = temp.MakeConfig(defaultRepo: Repo);
+        Triagent.Config.TriagentConfig.Save(config, configFile.Path);
 
-        await SeedIssueAsync(config, "getsentry/sentry-dotnet", 1001, scored: true);
-        await SeedIssueAsync(config, "getsentry/sentry-dotnet", 1002, scored: true);
+        await SeedIssueAsync(temp, 1001);
+        await SeedIssueAsync(temp, 1002);
 
-        await using (var db = await IssueDb.OpenAsync(config.ResolvedDbPath))
-            await db.SaveReviewDecisionAsync("getsentry/sentry-dotnet", 1002, ReviewDecision.Skip, "skip me");
+        await using (var db = await temp.OpenAsync())
+            await db.SaveReviewDecisionAsync(Repo, 1002, ReviewDecision.Skip, "skip me");
 
         await ReviewCommand.RunAsync(
-            repo: "getsentry/sentry-dotnet",
+            repo: Repo,
             config,
             onAppReady: app =>
             {
@@ -189,9 +194,9 @@ public sealed class ReviewCommandUiTests
             },
             ct: CancellationToken.None);
 
-        await using var db2 = await IssueDb.OpenAsync(config.ResolvedDbPath);
-        var aRow = await db2.GetAsync("getsentry/sentry-dotnet", 1001);
-        var bRow = await db2.GetAsync("getsentry/sentry-dotnet", 1002);
+        await using var db2 = await temp.OpenAsync();
+        var aRow = await db2.GetAsync(Repo, 1001);
+        var bRow = await db2.GetAsync(Repo, 1002);
 
         Assert.NotNull(aRow);
         Assert.NotNull(bRow);
@@ -200,14 +205,11 @@ public sealed class ReviewCommandUiTests
         Assert.Equal("skip me", bRow.ReviewReason);
     }
 
-    private static async Task SeedIssueAsync(TriagentConfig config, string repo, int number, bool scored)
+    private static async Task SeedIssueAsync(TempDb temp, int number)
     {
-        await using var db = await IssueDb.OpenAsync(config.ResolvedDbPath);
+        await using var db = await temp.OpenAsync();
         var issue = new GitHubIssueSummary(number, $"Issue {number}", $"https://example/{number}", "", DateTimeOffset.UtcNow, IsAssigned: false);
-        await db.UpsertSummaryAsync(repo, issue, hasLinkedPr: false, isAssigned: false);
-        if (scored)
-            await db.SaveScoreAsync(repo, new IssueScore(number, 3, 3, 3, 3, 3, "ok"), "claude");
+        await db.UpsertSummaryAsync(Repo, issue, hasLinkedPr: false, isAssigned: false);
+        await db.SaveScoreAsync(Repo, new IssueScore(number, 3, 3, 3, 3, 3, "ok"), "claude");
     }
-
-    private static string TempDbPath() => Path.Combine(Path.GetTempPath(), $"triagent-tests-{Guid.NewGuid():N}.db");
 }

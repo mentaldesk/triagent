@@ -11,12 +11,28 @@ public sealed class IssueDb : IAsyncDisposable
 
     private IssueDb(SqliteConnection connection) => _connection = connection;
 
-    public static async Task<IssueDb> OpenAsync(string path, CancellationToken ct = default)
+    /// <summary>
+    /// Opens an IssueDb. Accepts either a file path (creates the parent directory if
+    /// missing) or a full SQLite connection string starting with <c>Data Source=</c>
+    /// (used by tests for in-memory databases).
+    /// </summary>
+    public static Task<IssueDb> OpenAsync(string pathOrConnectionString, CancellationToken ct = default)
     {
-        var dir = Path.GetDirectoryName(path);
-        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+        if (pathOrConnectionString.StartsWith("Data Source=", StringComparison.OrdinalIgnoreCase))
+            return OpenWithConnectionStringAsync(pathOrConnectionString, ct);
 
-        var connection = new SqliteConnection($"Data Source={path}");
+        var dir = Path.GetDirectoryName(pathOrConnectionString);
+        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
+        return OpenWithConnectionStringAsync($"Data Source={pathOrConnectionString}", ct);
+    }
+
+    /// <summary>
+    /// Opens an IssueDb against an arbitrary SQLite connection string. Intended for
+    /// in-memory databases in tests (e.g. <c>Data Source=file:foo?mode=memory&amp;cache=shared</c>).
+    /// </summary>
+    public static async Task<IssueDb> OpenWithConnectionStringAsync(string connectionString, CancellationToken ct = default)
+    {
+        var connection = new SqliteConnection(connectionString);
         await connection.OpenAsync(ct);
 
         var db = new IssueDb(connection);

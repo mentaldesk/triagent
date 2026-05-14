@@ -24,33 +24,59 @@ public sealed class TriagentConfig
     /// </summary>
     public List<string> LinkedPrRepos { get; set; } = new();
 
+    /// <summary>
+    /// Path this config was loaded from. <see cref="Save()"/> writes back here.
+    /// Set by <see cref="Load(string?)"/> / <see cref="Save(TriagentConfig, string)"/>.
+    /// Not serialized.
+    /// </summary>
+    [JsonIgnore]
+    public string? SourcePath { get; set; }
+
     [JsonIgnore]
     public string ResolvedDbPath => ExpandHome(DbPath);
 
-    public static string ConfigDir =>
-        Path.Combine(GetHomeDirectory(), ".triagent");
+    public static string DefaultConfigPath =>
+        Path.Combine(GetHomeDirectory(), ".triagent", "config.json");
 
-    public static string ConfigPath => Path.Combine(ConfigDir, "config.json");
-
-    public static TriagentConfig Load()
+    public static TriagentConfig Load(string? path = null)
     {
-        if (!File.Exists(ConfigPath))
+        var resolved = path ?? DefaultConfigPath;
+
+        if (!File.Exists(resolved))
         {
             var defaults = new TriagentConfig();
-            Save(defaults);
+            Save(defaults, resolved);
             return defaults;
         }
 
-        var json = File.ReadAllText(ConfigPath);
-        return JsonSerializer.Deserialize(json, JsonContext.Default.TriagentConfig)
+        var json = File.ReadAllText(resolved);
+        var config = JsonSerializer.Deserialize(json, JsonContext.Default.TriagentConfig)
             ?? new TriagentConfig();
+        config.SourcePath = resolved;
+        return config;
     }
 
-    public static void Save(TriagentConfig config)
+    /// <summary>
+    /// Saves this config back to <see cref="SourcePath"/>.
+    /// </summary>
+    public void Save()
     {
-        Directory.CreateDirectory(ConfigDir);
+        if (string.IsNullOrEmpty(SourcePath))
+            throw new InvalidOperationException(
+                "TriagentConfig has no SourcePath. Use Load() first or call Save(config, path).");
+        Save(this, SourcePath);
+    }
+
+    /// <summary>
+    /// Saves <paramref name="config"/> to an explicit path and records it on <see cref="SourcePath"/>.
+    /// </summary>
+    public static void Save(TriagentConfig config, string path)
+    {
+        var dir = Path.GetDirectoryName(path);
+        if (!string.IsNullOrEmpty(dir)) Directory.CreateDirectory(dir);
         var json = JsonSerializer.Serialize(config, JsonContext.Default.TriagentConfig);
-        File.WriteAllText(ConfigPath, json);
+        File.WriteAllText(path, json);
+        config.SourcePath = path;
     }
 
     private static string ExpandHome(string path)
