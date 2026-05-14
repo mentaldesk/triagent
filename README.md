@@ -20,6 +20,15 @@ Behavior:
   `linkedPrRepos` from `~/.triagent/config.json` once and persists it for that
   target repo.
 
+Manage repo-scoped mappings via CLI:
+
+- `triagent linked-repos list --repo owner/target`
+- `triagent linked-repos set --repo owner/target owner/docs owner/tools`
+- `triagent linked-repos add --repo owner/target owner/new-repo`
+- `triagent linked-repos remove --repo owner/target owner/docs`
+
+`--repo` defaults to `defaultRepo` from config.
+
 This keeps single-repo setups working while preventing cross-repo leakage in
 multi-repo usage.
 

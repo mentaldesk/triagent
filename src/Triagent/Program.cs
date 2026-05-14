@@ -154,6 +154,73 @@ reviewCommand.SetAction(async (parseResult, ct) =>
     return await ReviewCommand.RunAsync(repo, config, ct);
 });
 
+// ---- linked-repos ----
+var linkedReposCommand = new Command("linked-repos", "Manage repo-scoped linked PR repos used by analyze.");
+
+var linkedList = new Command("list", "Show linked PR repos for a target repo.");
+var linkedSet = new Command("set", "Replace linked PR repos for a target repo.");
+var linkedAdd = new Command("add", "Add one or more linked PR repos for a target repo.");
+var linkedRemove = new Command("remove", "Remove one or more linked PR repos for a target repo.");
+
+var linkedRepoOpt = new Option<string?>("--repo") { Description = "Target analyzed repo (defaults to config.defaultRepo)." };
+var linkedReposArg = new Argument<string[]>("repos")
+{
+    Description = "One or more owner/name repos.",
+    Arity = ArgumentArity.OneOrMore,
+};
+
+linkedList.Add(linkedRepoOpt);
+linkedSet.Add(linkedRepoOpt);
+linkedSet.Add(linkedReposArg);
+linkedAdd.Add(linkedRepoOpt);
+linkedAdd.Add(linkedReposArg);
+linkedRemove.Add(linkedRepoOpt);
+linkedRemove.Add(linkedReposArg);
+
+linkedList.SetAction(async (parseResult, ct) =>
+{
+    var dbOverride = parseResult.GetValue(dbOption);
+    if (dbOverride is not null) config.DbPath = dbOverride;
+
+    var repo = parseResult.GetValue(linkedRepoOpt) ?? config.DefaultRepo;
+    return await LinkedReposCommand.ListAsync(repo, config, ct);
+});
+
+linkedSet.SetAction(async (parseResult, ct) =>
+{
+    var dbOverride = parseResult.GetValue(dbOption);
+    if (dbOverride is not null) config.DbPath = dbOverride;
+
+    var repo = parseResult.GetValue(linkedRepoOpt) ?? config.DefaultRepo;
+    var repos = parseResult.GetValue(linkedReposArg) ?? Array.Empty<string>();
+    return await LinkedReposCommand.SetAsync(repo, repos, config, ct);
+});
+
+linkedAdd.SetAction(async (parseResult, ct) =>
+{
+    var dbOverride = parseResult.GetValue(dbOption);
+    if (dbOverride is not null) config.DbPath = dbOverride;
+
+    var repo = parseResult.GetValue(linkedRepoOpt) ?? config.DefaultRepo;
+    var repos = parseResult.GetValue(linkedReposArg) ?? Array.Empty<string>();
+    return await LinkedReposCommand.AddAsync(repo, repos, config, ct);
+});
+
+linkedRemove.SetAction(async (parseResult, ct) =>
+{
+    var dbOverride = parseResult.GetValue(dbOption);
+    if (dbOverride is not null) config.DbPath = dbOverride;
+
+    var repo = parseResult.GetValue(linkedRepoOpt) ?? config.DefaultRepo;
+    var repos = parseResult.GetValue(linkedReposArg) ?? Array.Empty<string>();
+    return await LinkedReposCommand.RemoveAsync(repo, repos, config, ct);
+});
+
+linkedReposCommand.Add(linkedList);
+linkedReposCommand.Add(linkedSet);
+linkedReposCommand.Add(linkedAdd);
+linkedReposCommand.Add(linkedRemove);
+
 root.Add(analyzeCommand);
 root.Add(topCommand);
 root.Add(showCommand);
@@ -161,5 +228,6 @@ root.Add(statsCommand);
 root.Add(exportCommand);
 root.Add(reposCommand);
 root.Add(reviewCommand);
+root.Add(linkedReposCommand);
 
 return await root.Parse(args).InvokeAsync();

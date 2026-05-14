@@ -153,6 +153,10 @@ triagent show      <number> [--repo R]
 triagent stats     [--repo R] [--include-closed]
 triagent export    [--repo R] [--format tsv|csv|json] [--output PATH]
 triagent repos     -- list repos tracked in the DB
+triagent linked-repos list   [--repo R]
+triagent linked-repos set    [--repo R] <owner/repo>...
+triagent linked-repos add    [--repo R] <owner/repo>...
+triagent linked-repos remove [--repo R] <owner/repo>...
 ```
 
 Default `--repo` can be set in a config file so day-to-day commands don't need it.
