@@ -1,3 +1,4 @@
+using Sentry;
 using Spectre.Console;
 using Triagent.Config;
 using Triagent.Data;
@@ -16,14 +17,34 @@ public static class TopCommand
         TriagentConfig config,
         CancellationToken ct)
     {
-        await using var db = await IssueDb.OpenAsync(config.ResolvedDbPath, ct);
-        var rows = await db.QueryTopAsync(repo, state, limit, minScore, label, excludeAssigned, ct);
-
-        if (rows.Count == 0)
+        var tx = SentrySdk.StartTransaction("top", "triagent.top");
+        SentrySdk.ConfigureScope(scope =>
         {
-            AnsiConsole.MarkupLine("[yellow]No issues match.[/]");
-            return 0;
-        }
+            scope.Transaction = tx;
+            scope.SetTag("repo", repo ?? "(all)");
+            scope.SetTag("state", state);
+            scope.SetTag("limit", limit.ToString());
+            scope.SetTag("exclude_assigned", excludeAssigned.ToString());
+        });
+
+        try
+        {
+            var dbSpan = tx.StartChild("db.open", "Open issue DB");
+            await using var db = await IssueDb.OpenAsync(config.ResolvedDbPath, ct);
+            dbSpan.Finish(SpanStatus.Ok);
+
+            var querySpan = tx.StartChild("db.query_top", "Query top issues");
+            var rows = await db.QueryTopAsync(repo, state, limit, minScore, label, excludeAssigned, ct);
+            querySpan.Finish(SpanStatus.Ok);
+
+            tx.SetData("rows", rows.Count);
+
+            if (rows.Count == 0)
+            {
+                AnsiConsole.MarkupLine("[yellow]No issues match.[/]");
+                tx.Finish(SpanStatus.Ok);
+                return 0;
+            }
 
         var table = new Table().Border(TableBorder.Rounded);
         table.AddColumn("Repo");
@@ -50,7 +71,14 @@ public static class TopCommand
                 Markup.Escape(r.Title));
         }
 
-        AnsiConsole.Write(table);
-        return 0;
+            AnsiConsole.Write(table);
+            tx.Finish(SpanStatus.Ok);
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            tx.Finish(ex);
+            throw;
+        }
     }
 }

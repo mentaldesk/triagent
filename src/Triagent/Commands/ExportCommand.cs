@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Sentry;
 using Spectre.Console;
 using Triagent.Config;
 using Triagent.Data;
@@ -18,27 +19,58 @@ public static class ExportCommand
         TriagentConfig config,
         CancellationToken ct)
     {
-        await using var db = await IssueDb.OpenAsync(config.ResolvedDbPath, ct);
-        var rows = await db.AllAsync(repo, includeClosed, ct);
+        var tx = SentrySdk.StartTransaction("export", "triagent.export");
+        SentrySdk.ConfigureScope(scope =>
+        {
+            scope.Transaction = tx;
+            scope.SetTag("repo", repo ?? "(all)");
+            scope.SetTag("format", format);
+            scope.SetTag("include_closed", includeClosed.ToString());
+            scope.SetTag("has_output_file", (output is not null).ToString());
+        });
 
-        var content = format.ToLowerInvariant() switch
+        try
         {
-            "tsv" => ToDelimited(rows, '\t'),
-            "csv" => ToDelimited(rows, ','),
-            "json" => JsonSerializer.Serialize(rows, ExportJsonContext.Default.IReadOnlyListIssueRow),
-            _ => throw new ArgumentException($"Unknown --format '{format}'. Use tsv, csv, or json.")
-        };
+            var dbSpan = tx.StartChild("db.open", "Open issue DB");
+            await using var db = await IssueDb.OpenAsync(config.ResolvedDbPath, ct);
+            dbSpan.Finish(SpanStatus.Ok);
 
-        if (output is null)
-        {
-            Console.Write(content);
+            var querySpan = tx.StartChild("db.all", "Query export rows");
+            var rows = await db.AllAsync(repo, includeClosed, ct);
+            querySpan.Finish(SpanStatus.Ok);
+
+            tx.SetData("rows", rows.Count);
+
+            var formatSpan = tx.StartChild("export.format", "Render export payload");
+            var content = format.ToLowerInvariant() switch
+            {
+                "tsv" => ToDelimited(rows, '\t'),
+                "csv" => ToDelimited(rows, ','),
+                "json" => JsonSerializer.Serialize(rows, ExportJsonContext.Default.IReadOnlyListIssueRow),
+                _ => throw new ArgumentException($"Unknown --format '{format}'. Use tsv, csv, or json.")
+            };
+            formatSpan.Finish(SpanStatus.Ok);
+
+            if (output is null)
+            {
+                Console.Write(content);
+            }
+            else
+            {
+                var writeSpan = tx.StartChild("export.write", "Write export output file");
+                await File.WriteAllTextAsync(output, content, ct);
+                writeSpan.Finish(SpanStatus.Ok);
+                AnsiConsole.MarkupLine($"[green]Wrote {rows.Count} rows to {output}[/]");
+            }
+
+            tx.Finish(SpanStatus.Ok);
+            return 0;
         }
-        else
+        catch (Exception ex)
         {
-            await File.WriteAllTextAsync(output, content, ct);
-            AnsiConsole.MarkupLine($"[green]Wrote {rows.Count} rows to {output}[/]");
+            tx.Finish(ex);
+            throw;
         }
-        return 0;
     }
 
     private static string ToDelimited(IReadOnlyList<IssueRow> rows, char sep)

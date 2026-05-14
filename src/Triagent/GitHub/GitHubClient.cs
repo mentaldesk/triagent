@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using Octokit;
+using Sentry;
 using Triagent.Models;
 
 namespace Triagent.GitHub;
@@ -49,10 +50,14 @@ public sealed class GitHubClient
     public async Task<IReadOnlyList<GitHubIssueSummary>> GetAllOpenIssuesAsync(
         string owner, string repo, CancellationToken ct = default)
     {
+        var span = SentrySdk.GetSpan()?.StartChild("github.issues.list", "GitHub list open issues");
+        span?.SetTag("repo", $"{owner}/{repo}");
+
         var request = new RepositoryIssueRequest { State = ItemStateFilter.Open };
         var options = new ApiOptions { PageSize = 100 };
         var issues = await _client.Issue.GetAllForRepository(owner, repo, request, options);
-        return issues
+
+        var result = issues
             .Where(i => i.PullRequest is null)
             .Select(i => new GitHubIssueSummary(
                 i.Number,
@@ -63,13 +68,24 @@ public sealed class GitHubClient
                 string.Join(", ", i.Assignees.Select(a => a.Login)),
                 i.UpdatedAt ?? i.CreatedAt))
             .ToList();
+
+        span?.SetData("open_issue_count", result.Count);
+        span?.Finish(SpanStatus.Ok);
+        return result;
     }
 
     public async Task<(string Body, IReadOnlyList<string> Comments)> GetIssueDetailAsync(
         string owner, string repo, int number, CancellationToken ct = default)
     {
+        var span = SentrySdk.GetSpan()?.StartChild("github.issue.detail", "GitHub fetch issue detail");
+        span?.SetTag("repo", $"{owner}/{repo}");
+        span?.SetData("issue_number", number);
+
         var issue = await _client.Issue.Get(owner, repo, number);
         var comments = await _client.Issue.Comment.GetAllForIssue(owner, repo, number);
+
+        span?.SetData("comment_count", comments.Count);
+        span?.Finish(SpanStatus.Ok);
         return (issue.Body ?? "", comments.Select(c => c.Body ?? "").ToList());
     }
 

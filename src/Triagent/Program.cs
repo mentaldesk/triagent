@@ -1,4 +1,6 @@
 using System.CommandLine;
+using Sentry;
+using Sentry.Extensibility;
 using Spectre.Console;
 using Triagent.Commands;
 using Triagent.Config;
@@ -9,7 +11,11 @@ var root = new RootCommand("Triagent — score GitHub issues for AI-agent doabil
 
 // Shared options
 var dbOption = new Option<string?>("--db") { Description = "Override database path." };
+var sentryDsnOption = new Option<string?>("--sentry-dsn") { Description = "Sentry DSN for error reporting/tracing (overrides config.sentryDsn)." };
+var sentryDebugOption = new Option<bool>("--sentry-debug") { Description = "Enable Sentry SDK diagnostic logging to stderr." };
 root.Add(dbOption);
+root.Add(sentryDsnOption);
+root.Add(sentryDebugOption);
 
 // ---- analyze ----
 var analyzeCommand = new Command("analyze", "Fetch open issues and score new/changed ones.");
@@ -230,4 +236,68 @@ root.Add(reposCommand);
 root.Add(reviewCommand);
 root.Add(linkedReposCommand);
 
-return await root.Parse(args).InvokeAsync();
+var parseResult = root.Parse(args);
+
+var sentryDsn = parseResult.GetValue(sentryDsnOption) ?? config.SentryDsn;
+var release = typeof(Program).Assembly.GetName().Version?.ToString();
+var sentryDebug = parseResult.GetValue(sentryDebugOption)
+    || string.Equals(Environment.GetEnvironmentVariable("SENTRY_DEBUG"), "1", StringComparison.OrdinalIgnoreCase)
+    || string.Equals(Environment.GetEnvironmentVariable("SENTRY_DEBUG"), "true", StringComparison.OrdinalIgnoreCase);
+
+if (!string.IsNullOrWhiteSpace(sentryDsn))
+{
+    using var sentry = SentrySdk.Init(o =>
+    {
+        o.Dsn = sentryDsn;
+        o.TracesSampleRate = 1.0;
+        o.Release = release;
+        o.Debug = sentryDebug;
+        o.DiagnosticLevel = SentryLevel.Debug;
+        o.DiagnosticLogger = sentryDebug ? new StderrSentryDiagnosticLogger() : null;
+        o.AutoSessionTracking = false;
+    });
+
+    var exitCode = await InvokeRootAsync(parseResult);
+    await SentrySdk.FlushAsync(TimeSpan.FromSeconds(5));
+    return exitCode;
+}
+
+return await InvokeRootAsync(parseResult);
+
+static async Task<int> InvokeRootAsync(ParseResult parseResult)
+{
+    var commandName = parseResult.CommandResult.Command.Name;
+    var tx = SentrySdk.StartTransaction($"cli.{commandName}", "triagent.cli");
+    SentrySdk.ConfigureScope(scope =>
+    {
+        scope.Transaction = tx;
+        scope.SetTag("command", commandName);
+    });
+
+    try
+    {
+        var exitCode = await parseResult.InvokeAsync();
+        tx.SetData("exit_code", exitCode);
+        tx.Finish(exitCode == 0 ? SpanStatus.Ok : SpanStatus.InternalError);
+        return exitCode;
+    }
+    catch (Exception ex)
+    {
+        tx.Finish(SpanStatus.InternalError);
+        SentrySdk.CaptureException(ex);
+        throw;
+    }
+}
+
+file sealed class StderrSentryDiagnosticLogger : IDiagnosticLogger
+{
+    public bool IsEnabled(SentryLevel level) => true;
+
+    public void Log(SentryLevel logLevel, string message, Exception? exception = null, params object?[] args)
+    {
+        var rendered = args.Length > 0 ? string.Format(message, args) : message;
+        Console.Error.WriteLine($"[sentry:{logLevel}] {rendered}");
+        if (exception is not null)
+            Console.Error.WriteLine(exception);
+    }
+}
