@@ -61,6 +61,14 @@ When configured, `analyze` emits tracing spans for major phases (GitHub fetch,
 DB sync, detail hydration, scoring batches) and captures exceptions with batch
 context.
 
+For quick SDK diagnostics (without waiting for analyze), run any command with:
+
+- `./dev.cs stats --sentry-debug`
+
+You can also enable debug logging via env var:
+
+- `SENTRY_DEBUG=1 ./dev.cs stats`
+
 ## Top filtering
 
 `triagent top` supports these key filters:

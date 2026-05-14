@@ -1,3 +1,4 @@
+using Sentry;
 using Spectre.Console;
 using Triagent.Config;
 using Triagent.Data;
@@ -8,19 +9,37 @@ public static class ShowCommand
 {
     public static async Task<int> RunAsync(int number, string? repo, TriagentConfig config, CancellationToken ct)
     {
-        if (repo is null)
+        var tx = SentrySdk.StartTransaction("show", "triagent.show");
+        SentrySdk.ConfigureScope(scope =>
         {
-            AnsiConsole.MarkupLine("[red]--repo is required (or set defaultRepo in config).[/]");
-            return 1;
-        }
+            scope.Transaction = tx;
+            scope.SetTag("repo", repo ?? "(null)");
+            scope.SetTag("number", number.ToString());
+        });
 
-        await using var db = await IssueDb.OpenAsync(config.ResolvedDbPath, ct);
-        var row = await db.GetAsync(repo, number, ct);
-        if (row is null)
+        try
         {
-            AnsiConsole.MarkupLine($"[red]No record for {repo}#{number}.[/]");
-            return 1;
-        }
+            if (repo is null)
+            {
+                AnsiConsole.MarkupLine("[red]--repo is required (or set defaultRepo in config).[/]");
+                tx.Finish(SpanStatus.InvalidArgument);
+                return 1;
+            }
+
+            var dbSpan = tx.StartChild("db.open", "Open issue DB");
+            await using var db = await IssueDb.OpenAsync(config.ResolvedDbPath, ct);
+            dbSpan.Finish(SpanStatus.Ok);
+
+            var querySpan = tx.StartChild("db.get_issue", "Get issue row");
+            var row = await db.GetAsync(repo, number, ct);
+            querySpan.Finish(SpanStatus.Ok);
+
+            if (row is null)
+            {
+                AnsiConsole.MarkupLine($"[red]No record for {repo}#{number}.[/]");
+                tx.Finish(SpanStatus.NotFound);
+                return 1;
+            }
 
         var grid = new Grid().AddColumn().AddColumn();
         grid.AddRow("[bold]Repo[/]", row.Repo);
@@ -43,7 +62,14 @@ public static class ShowCommand
         grid.AddRow("[bold]Self-sufficiency[/]", row.SelfSufficiency?.ToString() ?? "-");
         grid.AddRow("[bold]Rationale[/]", Markup.Escape(row.Rationale ?? "-"));
 
-        AnsiConsole.Write(grid);
-        return 0;
+            AnsiConsole.Write(grid);
+            tx.Finish(SpanStatus.Ok);
+            return 0;
+        }
+        catch (Exception ex)
+        {
+            tx.Finish(ex);
+            throw;
+        }
     }
 }
