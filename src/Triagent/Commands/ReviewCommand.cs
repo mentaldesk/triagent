@@ -28,7 +28,7 @@ public static class ReviewCommand
         }
 
         List<IssueRow> visibleIssues = [.. allIssues];
-        ReviewDecision? activeFilter = null;
+        ReviewDecision? activeFilter = ParseFilter(config.ReviewFilter);
         bool modalOpen = false;
 
         using IApplication app = Application.Create();
@@ -59,7 +59,7 @@ public static class ReviewCommand
             X = 0,
             Y = Pos.AnchorEnd(1),
             Width = Dim.Fill(),
-            Text = "Showing: All  |  ?/F1 Help   Ctrl+A All   Ctrl+Q Quit",
+            Text = "Showing: All  |  ?/F1 Help   Ctrl+Q Quit",
         };
 
         win.Add(list, details, status);
@@ -77,6 +77,21 @@ public static class ReviewCommand
             _ => "All",
         };
 
+        static string FilterToConfigValue(ReviewDecision? filter) => filter switch
+        {
+            null => "all",
+            ReviewDecision.None => "unreviewed",
+            ReviewDecision.Skip => "skip",
+            ReviewDecision.Try => "try",
+            _ => "all",
+        };
+
+        void PersistFilter()
+        {
+            config.ReviewFilter = FilterToConfigValue(activeFilter);
+            TriagentConfig.Save(config);
+        }
+
         void RefreshList(string? preferredRepo = null, int preferredIssueNumber = -1)
         {
             visibleIssues = activeFilter switch
@@ -90,7 +105,7 @@ public static class ReviewCommand
             if (visibleIssues.Count == 0)
             {
                 details.Text = $"No issues for filter: {FilterText()}";
-                status.Text = $"Showing: {FilterText()}  |  ?/F1 Help   Ctrl+A All   Ctrl+Q Quit";
+                status.Text = $"Showing: {FilterText()}  |  ?/F1 Help   Ctrl+Q Quit";
                 return;
             }
 
@@ -132,7 +147,7 @@ public static class ReviewCommand
                 $"Decision: {i.ReviewDecision.ToDisplay()}\n" +
                 $"Reason: {i.ReviewReason ?? "(none)"}";
 
-            status.Text = $"Showing: {FilterText()}  |  Selected #{i.Number}  |  ?/F1 Help   Ctrl+A All   Ctrl+Q Quit";
+            status.Text = $"Showing: {FilterText()}  |  Selected #{i.Number}  |  ?/F1 Help   Ctrl+Q Quit";
         }
 
         void ShowHelp()
@@ -145,7 +160,7 @@ public static class ReviewCommand
                 "O: Open in browser\n" +
                 "S: Skip (reason required)\n" +
                 "T: Mark Try\n" +
-                "R: Mark Unreviewed\n\n" +
+                "U: Mark Unreviewed\n\n" +
                 "App actions:\n" +
                 "Ctrl+Q: Quit\n" +
                 "Ctrl+A: Show All (clear filter)\n" +
@@ -350,6 +365,7 @@ public static class ReviewCommand
             if (k.IsCtrl && !k.IsAlt && k.NoCtrl.KeyCode == KeyCode.A)
             {
                 activeFilter = null;
+                PersistFilter();
                 RefreshList();
                 return true;
             }
@@ -357,6 +373,7 @@ public static class ReviewCommand
             if (k.IsCtrl && !k.IsAlt && k.NoCtrl.KeyCode == KeyCode.U)
             {
                 activeFilter = ReviewDecision.None;
+                PersistFilter();
                 RefreshList();
                 return true;
             }
@@ -364,6 +381,7 @@ public static class ReviewCommand
             if (k.IsCtrl && !k.IsAlt && k.NoCtrl.KeyCode == KeyCode.S)
             {
                 activeFilter = ReviewDecision.Skip;
+                PersistFilter();
                 RefreshList();
                 return true;
             }
@@ -371,6 +389,7 @@ public static class ReviewCommand
             if (k.IsCtrl && !k.IsAlt && k.NoCtrl.KeyCode == KeyCode.T)
             {
                 activeFilter = ReviewDecision.Try;
+                PersistFilter();
                 RefreshList();
                 return true;
             }
@@ -406,7 +425,7 @@ public static class ReviewCommand
                 return true;
             }
 
-            if (!k.IsCtrl && !k.IsAlt && baseKey == KeyCode.R)
+            if (!k.IsCtrl && !k.IsAlt && baseKey == KeyCode.U)
             {
                 await MarkUnreviewedAsync();
                 return true;
@@ -427,6 +446,15 @@ public static class ReviewCommand
         app.Run(win);
         return 0;
     }
+
+    private static ReviewDecision? ParseFilter(string? raw) => raw?.Trim().ToLowerInvariant() switch
+    {
+        null or "" or "all" => null,
+        "unreviewed" => ReviewDecision.None,
+        "skip" => ReviewDecision.Skip,
+        "try" => ReviewDecision.Try,
+        _ => null,
+    };
 
     private static bool IsSshSession() =>
         !string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("SSH_CONNECTION")) ||

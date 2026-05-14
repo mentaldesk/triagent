@@ -71,7 +71,7 @@ public sealed class ReviewCommandUiTests
     }
 
     [Fact]
-    public async Task R_reverts_selected_issue_to_unreviewed()
+    public async Task U_reverts_selected_issue_to_unreviewed()
     {
         var dbPath = TempDbPath();
         var config = new TriagentConfig { DbPath = dbPath, DefaultRepo = "getsentry/sentry-dotnet" };
@@ -91,7 +91,7 @@ public sealed class ReviewCommandUiTests
                     switch (step++)
                     {
                         case 0:
-                            if (Key.TryParse("R", out var r)) app.InjectKey(r);
+                            if (Key.TryParse("U", out var u)) app.InjectKey(u);
                             break;
                         case 1:
                             if (Key.TryParse("Ctrl+Q", out var quit)) app.InjectKey(quit);

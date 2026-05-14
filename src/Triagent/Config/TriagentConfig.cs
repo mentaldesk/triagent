@@ -12,6 +12,11 @@ public sealed class TriagentConfig
     public string DbPath { get; set; } = "~/.triagent/triagent.db";
 
     /// <summary>
+    /// Persisted review filter: all | unreviewed | skip | try.
+    /// </summary>
+    public string ReviewFilter { get; set; } = "all";
+
+    /// <summary>
     /// Repositories to scan for open PRs that link to issues in the analyzed repo.
     /// Entries must be in owner/name form. If unset/empty, Triagent scans only the
     /// analyzed repository.
