@@ -1,5 +1,40 @@
 namespace Triagent.Models;
 
+public enum ReviewDecision
+{
+    None = 0,
+    Try = 1,
+    Skip = 2,
+}
+
+public static class ReviewDecisionExtensions
+{
+    public static string? ToDbValue(this ReviewDecision decision) => decision switch
+    {
+        ReviewDecision.None => null,
+        ReviewDecision.Try => "try",
+        ReviewDecision.Skip => "skip",
+        _ => throw new ArgumentOutOfRangeException(nameof(decision), decision, "Unknown decision value."),
+    };
+
+    public static ReviewDecision FromDbValue(string? value) => value switch
+    {
+        null => ReviewDecision.None,
+        "" => ReviewDecision.None,
+        "try" => ReviewDecision.Try,
+        "skip" => ReviewDecision.Skip,
+        _ => ReviewDecision.None,
+    };
+
+    public static string ToDisplay(this ReviewDecision decision) => decision switch
+    {
+        ReviewDecision.None => "Unreviewed",
+        ReviewDecision.Try => "Try",
+        ReviewDecision.Skip => "Skip",
+        _ => "Unreviewed",
+    };
+}
+
 /// <summary>
 /// A row in the issues table — the stored representation of a GitHub issue and its
 /// most recent score (if any).
@@ -13,6 +48,7 @@ public sealed record IssueRow
     public string Labels { get; init; } = string.Empty;
     public required string State { get; init; }              // "open" | "closed"
     public bool HasLinkedPr { get; init; }
+    public bool IsAssigned { get; init; }
     public required DateTimeOffset GitHubUpdatedAt { get; init; }
     public DateTimeOffset? ClosedAt { get; init; }
     public DateTimeOffset? LastScoredAt { get; init; }
@@ -24,6 +60,9 @@ public sealed record IssueRow
     public int? SelfSufficiency { get; init; }
     public int? Total { get; init; }
     public string? Rationale { get; init; }
+    public ReviewDecision ReviewDecision { get; init; }
+    public string? ReviewReason { get; init; }
+    public DateTimeOffset? DecidedAt { get; init; }
 }
 
 /// <summary>
@@ -34,7 +73,8 @@ public sealed record GitHubIssueSummary(
     string Title,
     string Url,
     string Labels,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    bool IsAssigned);
 
 /// <summary>
 /// An issue plus its comments, ready to be passed to a scorer.

@@ -32,7 +32,7 @@ public sealed class IssueDb : IAsyncDisposable
 
     private async Task MigrateAsync(CancellationToken ct)
     {
-        const string sql = """
+        const string createSql = """
             CREATE TABLE IF NOT EXISTS issues (
               repo                 TEXT    NOT NULL,
               number               INTEGER NOT NULL,
@@ -41,6 +41,7 @@ public sealed class IssueDb : IAsyncDisposable
               labels               TEXT    NOT NULL DEFAULT '',
               state                TEXT    NOT NULL,
               has_linked_pr        INTEGER NOT NULL DEFAULT 0,
+              is_assigned          INTEGER NOT NULL DEFAULT 0,
               github_updated_at    TEXT    NOT NULL,
               closed_at            TEXT,
               last_scored_at       TEXT,
@@ -52,16 +53,47 @@ public sealed class IssueDb : IAsyncDisposable
               self_sufficiency     INTEGER,
               total                INTEGER,
               rationale            TEXT,
+              review_decision      TEXT,
+              review_reason        TEXT,
+              decided_at           TEXT,
               PRIMARY KEY (repo, number)
             );
-
-            CREATE INDEX IF NOT EXISTS idx_issues_total ON issues(repo, state, total DESC);
-            CREATE INDEX IF NOT EXISTS idx_issues_state ON issues(repo, state);
             """;
 
+        await using (var createCmd = _connection.CreateCommand())
+        {
+            createCmd.CommandText = createSql;
+            await createCmd.ExecuteNonQueryAsync(ct);
+        }
+
+        await TryAddColumnAsync("ALTER TABLE issues ADD COLUMN review_decision TEXT", ct);
+        await TryAddColumnAsync("ALTER TABLE issues ADD COLUMN review_reason TEXT", ct);
+        await TryAddColumnAsync("ALTER TABLE issues ADD COLUMN decided_at TEXT", ct);
+        await TryAddColumnAsync("ALTER TABLE issues ADD COLUMN is_assigned INTEGER NOT NULL DEFAULT 0", ct);
+
+        const string indexSql = """
+            CREATE INDEX IF NOT EXISTS idx_issues_total ON issues(repo, state, total DESC);
+            CREATE INDEX IF NOT EXISTS idx_issues_state ON issues(repo, state);
+            CREATE INDEX IF NOT EXISTS idx_issues_review ON issues(repo, review_decision, total DESC);
+            """;
+
+        await using var indexCmd = _connection.CreateCommand();
+        indexCmd.CommandText = indexSql;
+        await indexCmd.ExecuteNonQueryAsync(ct);
+    }
+
+    private async Task TryAddColumnAsync(string sql, CancellationToken ct)
+    {
         await using var cmd = _connection.CreateCommand();
         cmd.CommandText = sql;
-        await cmd.ExecuteNonQueryAsync(ct);
+        try
+        {
+            await cmd.ExecuteNonQueryAsync(ct);
+        }
+        catch (SqliteException ex) when (ex.SqliteErrorCode == 1 && ex.Message.Contains("duplicate column name", StringComparison.OrdinalIgnoreCase))
+        {
+            // Column already exists in this DB; that's fine.
+        }
     }
 
     /// <summary>
@@ -113,18 +145,20 @@ public sealed class IssueDb : IAsyncDisposable
         string repo,
         GitHubIssueSummary summary,
         bool hasLinkedPr,
+        bool isAssigned,
         CancellationToken ct = default)
     {
         await using var cmd = _connection.CreateCommand();
         cmd.CommandText = """
-            INSERT INTO issues (repo, number, title, url, labels, state, has_linked_pr, github_updated_at)
-            VALUES ($repo, $number, $title, $url, $labels, 'open', $hasLinkedPr, $updatedAt)
+            INSERT INTO issues (repo, number, title, url, labels, state, has_linked_pr, is_assigned, github_updated_at)
+            VALUES ($repo, $number, $title, $url, $labels, 'open', $hasLinkedPr, $isAssigned, $updatedAt)
             ON CONFLICT(repo, number) DO UPDATE SET
               title             = excluded.title,
               url               = excluded.url,
               labels            = excluded.labels,
               state             = 'open',
               has_linked_pr     = excluded.has_linked_pr,
+              is_assigned       = excluded.is_assigned,
               github_updated_at = excluded.github_updated_at,
               closed_at         = NULL
             """;
@@ -134,6 +168,7 @@ public sealed class IssueDb : IAsyncDisposable
         cmd.Parameters.AddWithValue("$url", summary.Url);
         cmd.Parameters.AddWithValue("$labels", summary.Labels);
         cmd.Parameters.AddWithValue("$hasLinkedPr", hasLinkedPr ? 1 : 0);
+        cmd.Parameters.AddWithValue("$isAssigned", isAssigned ? 1 : 0);
         cmd.Parameters.AddWithValue("$updatedAt", summary.UpdatedAt.ToString(DateFormat, CultureInfo.InvariantCulture));
         await cmd.ExecuteNonQueryAsync(ct);
     }
@@ -175,6 +210,53 @@ public sealed class IssueDb : IAsyncDisposable
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
+    public async Task SaveReviewDecisionAsync(
+        string repo,
+        int number,
+        ReviewDecision decision,
+        string? reason,
+        CancellationToken ct = default)
+    {
+        if (decision == ReviewDecision.Skip && string.IsNullOrWhiteSpace(reason))
+            throw new ArgumentException("Skip decision requires a reason.", nameof(reason));
+
+        var normalizedReason = string.IsNullOrWhiteSpace(reason) ? null : reason.Trim();
+
+        await using var cmd = _connection.CreateCommand();
+        cmd.CommandText = """
+            UPDATE issues SET
+              review_decision = $decision,
+              review_reason   = $reason,
+              decided_at      = CASE WHEN $decision IS NULL THEN NULL ELSE $now END
+            WHERE repo = $repo AND number = $number
+            """;
+        cmd.Parameters.AddWithValue("$decision", (object?)decision.ToDbValue() ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$reason", (object?)normalizedReason ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("$now", DateTimeOffset.UtcNow.ToString(DateFormat, CultureInfo.InvariantCulture));
+        cmd.Parameters.AddWithValue("$repo", repo);
+        cmd.Parameters.AddWithValue("$number", number);
+
+        var updated = await cmd.ExecuteNonQueryAsync(ct);
+        if (updated != 1)
+            throw new InvalidOperationException($"No issue row updated for {repo}#{number}.");
+    }
+
+    public async Task<IReadOnlyList<IssueRow>> QueryReviewQueueAsync(string? repo, CancellationToken ct = default)
+    {
+        var sql = "SELECT * FROM issues WHERE state = 'open' AND total IS NOT NULL AND has_linked_pr = 0 AND is_assigned = 0";
+        if (repo is not null) sql += " AND repo = $repo";
+        sql += " ORDER BY total DESC, number DESC";
+
+        await using var cmd = _connection.CreateCommand();
+        cmd.CommandText = sql;
+        if (repo is not null) cmd.Parameters.AddWithValue("$repo", repo);
+
+        var rows = new List<IssueRow>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct)) rows.Add(ReadRow(reader));
+        return rows;
+    }
+
     /// <summary>
     /// Mark a set of issues as closed (i.e. they didn't appear in the latest open listing).
     /// </summary>
@@ -212,7 +294,7 @@ public sealed class IssueDb : IAsyncDisposable
         if (repo is not null) sql += " AND repo = $repo";
         if (minTotal is not null) sql += " AND total >= $minTotal";
         if (labelContains is not null) sql += " AND labels LIKE $labelLike";
-        sql += " AND has_linked_pr = 0 ORDER BY total DESC, number DESC LIMIT $limit";
+        sql += " AND has_linked_pr = 0 AND is_assigned = 0 ORDER BY total DESC, number DESC LIMIT $limit";
 
         await using var cmd = _connection.CreateCommand();
         cmd.CommandText = sql;
@@ -272,6 +354,7 @@ public sealed class IssueDb : IAsyncDisposable
             Labels = r.GetString(r.GetOrdinal("labels")),
             State = r.GetString(r.GetOrdinal("state")),
             HasLinkedPr = r.GetInt32(r.GetOrdinal("has_linked_pr")) != 0,
+            IsAssigned = r.GetInt32(r.GetOrdinal("is_assigned")) != 0,
             GitHubUpdatedAt = ParseDate(r.GetString(r.GetOrdinal("github_updated_at"))),
             ClosedAt = GetNullableDate(r, "closed_at"),
             LastScoredAt = GetNullableDate(r, "last_scored_at"),
@@ -283,6 +366,9 @@ public sealed class IssueDb : IAsyncDisposable
             SelfSufficiency = GetNullableInt(r, "self_sufficiency"),
             Total = GetNullableInt(r, "total"),
             Rationale = GetNullableString(r, "rationale"),
+            ReviewDecision = ReviewDecisionExtensions.FromDbValue(GetNullableString(r, "review_decision")),
+            ReviewReason = GetNullableString(r, "review_reason"),
+            DecidedAt = GetNullableDate(r, "decided_at"),
         };
     }
 

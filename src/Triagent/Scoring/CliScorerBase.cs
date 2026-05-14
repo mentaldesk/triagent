@@ -38,7 +38,7 @@ public abstract class CliScorerBase : IScorer
             }
         }
         throw new InvalidOperationException(
-            $"{Name} scorer failed after 3 attempts: {lastError?.Message}", lastError);
+            $"{Name} scorer failed after 3 attempts (promptChars={prompt.Length}): {lastError?.Message}", lastError);
     }
 
     private async Task<string> RunAsync(string prompt, CancellationToken ct)
@@ -65,8 +65,15 @@ public abstract class CliScorerBase : IScorer
         var stderr = await stderrTask;
 
         if (proc.ExitCode != 0)
+        {
+            var err = string.IsNullOrWhiteSpace(stderr) ? "(empty)" : stderr.Trim();
+            var outSnippet = string.IsNullOrWhiteSpace(stdout)
+                ? "(empty)"
+                : stdout.Trim()[..Math.Min(400, stdout.Trim().Length)];
+
             throw new InvalidOperationException(
-                $"{Executable} exited {proc.ExitCode}: {stderr.Trim()}");
+                $"{Executable} exited {proc.ExitCode}. stderr={err} stdout={outSnippet}");
+        }
 
         return stdout;
     }

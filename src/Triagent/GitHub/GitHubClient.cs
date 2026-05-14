@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Text.RegularExpressions;
 using Octokit;
 using Triagent.Models;
 
@@ -9,7 +8,7 @@ namespace Triagent.GitHub;
 /// Thin wrapper around Octokit for the operations Triagent needs. Auth comes from
 /// GITHUB_TOKEN if set, else from `gh auth token`.
 /// </summary>
-public sealed partial class GitHubClient
+public sealed class GitHubClient
 {
     private readonly Octokit.GitHubClient _client;
 
@@ -24,7 +23,7 @@ public sealed partial class GitHubClient
     private static string? ResolveToken()
     {
         var env = Environment.GetEnvironmentVariable("GITHUB_TOKEN");
-        if (!string.IsNullOrWhiteSpace(env)) return env;
+        if (!string.IsNullOrWhiteSpace(env)) return env.Trim();
 
         try
         {
@@ -36,9 +35,17 @@ public sealed partial class GitHubClient
             };
             using var proc = Process.Start(psi);
             if (proc is null) return null;
+
             var output = proc.StandardOutput.ReadToEnd().Trim();
-            proc.WaitForExit(2000);
-            return proc.ExitCode == 0 ? output : null;
+            var error = proc.StandardError.ReadToEnd().Trim();
+
+            // Don't use a short timeout here; if gh takes >2s we'd silently fall back to
+            // unauthenticated requests and immediately hit low GitHub rate limits.
+            proc.WaitForExit();
+
+            if (proc.ExitCode != 0) return null;
+            if (!string.IsNullOrWhiteSpace(error)) return null;
+            return string.IsNullOrWhiteSpace(output) ? null : output;
         }
         catch
         {
@@ -62,7 +69,8 @@ public sealed partial class GitHubClient
                 i.Title,
                 i.HtmlUrl,
                 string.Join(", ", i.Labels.Select(l => l.Name)),
-                i.UpdatedAt ?? i.CreatedAt))
+                i.UpdatedAt ?? i.CreatedAt,
+                i.Assignee is not null || (i.Assignees?.Count ?? 0) > 0))
             .ToList();
     }
 
@@ -78,38 +86,36 @@ public sealed partial class GitHubClient
     }
 
     /// <summary>
-    /// Returns the set of open issue numbers that have at least one open PR referencing
-    /// them via a "Closes/Fixes/Resolves #N" keyword in its body, across the provided
-    /// repositories. This is a cheap proxy for the official linked-PRs API, which only
-    /// exists in GraphQL.
+    /// Returns issue numbers with at least one associated open pull request using
+    /// GitHub's structured issue timeline cross-reference events (not body parsing).
     /// </summary>
     public async Task<HashSet<int>> GetIssuesLinkedToOpenPullRequestsAsync(
-        IReadOnlyList<(string Owner, string Repo)> repos,
+        string owner,
+        string repo,
+        IReadOnlyCollection<int> issueNumbers,
         CancellationToken ct = default)
     {
         var linked = new HashSet<int>();
 
-        foreach (var (owner, repo) in repos)
+        foreach (var issueNumber in issueNumbers)
         {
-            var prs = await _client.PullRequest.GetAllForRepository(owner, repo,
-                new PullRequestRequest { State = ItemStateFilter.Open },
-                new ApiOptions { PageSize = 100 });
+            var timeline = await _client.Issue.Timeline.GetAllForIssue(owner, repo, issueNumber, new ApiOptions { PageSize = 100 });
 
-            foreach (var pr in prs)
+            foreach (var ev in timeline)
             {
-                var body = pr.Body ?? "";
-                foreach (Match m in CloseKeywordRegex().Matches(body))
+                // cross-referenced + source is a PR => associated PR shown in Development pane
+                if (ev.Event != EventInfoState.Crossreferenced) continue;
+                if (ev.Source?.Issue?.PullRequest is null) continue;
+
+                // only count if that associated PR is still open
+                if (ev.Source.Issue.State == ItemState.Open)
                 {
-                    if (int.TryParse(m.Groups["n"].ValueSpan, out var n)) linked.Add(n);
+                    linked.Add(issueNumber);
+                    break;
                 }
             }
         }
 
         return linked;
     }
-
-    // GitHub's auto-close keywords: close[s|d], fix[es|ed], resolve[s|d] — followed by #N.
-    [GeneratedRegex(@"\b(?:close[sd]?|fix(?:es|ed)?|resolve[sd]?)\s+#(?<n>\d+)\b",
-        RegexOptions.IgnoreCase)]
-    private static partial Regex CloseKeywordRegex();
 }
