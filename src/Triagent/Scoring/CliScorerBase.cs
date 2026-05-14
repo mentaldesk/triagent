@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Sentry;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Triagent.Models;
@@ -21,28 +22,47 @@ public abstract class CliScorerBase : IScorer
         IReadOnlyList<IssueForScoring> batch,
         CancellationToken ct)
     {
+        var span = SentrySdk.GetSpan()?.StartChild("scorer.batch", "Score batch");
+        span?.SetTag("scorer", Name);
+        span?.SetData("batch_count", batch.Count);
+
         var prompt = ScorePrompt.Build(batch);
+        span?.SetData("prompt_chars", prompt.Length);
 
         Exception? lastError = null;
         for (var attempt = 0; attempt < 3; attempt++)
         {
+            var attemptSpan = span?.StartChild("scorer.attempt", $"Scorer attempt {attempt + 1}");
+            attemptSpan?.SetData("attempt", attempt + 1);
             try
             {
                 var output = await RunAsync(prompt, ct);
-                return ParseResponse(output);
+                var parsed = ParseResponse(output);
+                attemptSpan?.SetData("scores_returned", parsed.Count);
+                attemptSpan?.Finish(SpanStatus.Ok);
+                span?.Finish(SpanStatus.Ok);
+                return parsed;
             }
             catch (Exception ex) when (attempt < 2)
             {
+                attemptSpan?.SetTag("error", "true");
+                attemptSpan?.Finish(SpanStatus.InternalError);
                 lastError = ex;
                 await Task.Delay(TimeSpan.FromSeconds(2), ct);
             }
         }
+
+        span?.SetTag("error", "true");
+        span?.Finish(SpanStatus.InternalError);
         throw new InvalidOperationException(
             $"{Name} scorer failed after 3 attempts (promptChars={prompt.Length}): {lastError?.Message}", lastError);
     }
 
     private async Task<string> RunAsync(string prompt, CancellationToken ct)
     {
+        var span = SentrySdk.GetSpan()?.StartChild("scorer.exec", "Execute scorer CLI");
+        span?.SetTag("executable", Executable);
+
         var psi = new ProcessStartInfo
         {
             FileName = Executable,
@@ -64,6 +84,8 @@ public abstract class CliScorerBase : IScorer
         var stdout = await stdoutTask;
         var stderr = await stderrTask;
 
+        span?.SetData("exit_code", proc.ExitCode);
+
         if (proc.ExitCode != 0)
         {
             var err = string.IsNullOrWhiteSpace(stderr) ? "(empty)" : stderr.Trim();
@@ -71,10 +93,17 @@ public abstract class CliScorerBase : IScorer
                 ? "(empty)"
                 : stdout.Trim()[..Math.Min(400, stdout.Trim().Length)];
 
+            span?.SetTag("error", "true");
+            span?.SetData("stderr", err);
+            span?.SetData("stdout_snippet", outSnippet);
+            span?.Finish(SpanStatus.InternalError);
+
             throw new InvalidOperationException(
                 $"{Executable} exited {proc.ExitCode}. stderr={err} stdout={outSnippet}");
         }
 
+        span?.SetData("stdout_length", stdout.Length);
+        span?.Finish(SpanStatus.Ok);
         return stdout;
     }
 

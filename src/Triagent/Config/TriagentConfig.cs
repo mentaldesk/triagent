@@ -10,6 +10,7 @@ public sealed class TriagentConfig
     public string DefaultModel { get; set; } = "sonnet";
     public int BatchSize { get; set; } = 5;
     public string DbPath { get; set; } = "~/.triagent/triagent.db";
+    public string? SentryDsn { get; set; }
 
     /// <summary>
     /// Persisted review filter: all | unreviewed | skip | try.
@@ -27,7 +28,7 @@ public sealed class TriagentConfig
     public string ResolvedDbPath => ExpandHome(DbPath);
 
     public static string ConfigDir =>
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".triagent");
+        Path.Combine(GetHomeDirectory(), ".triagent");
 
     public static string ConfigPath => Path.Combine(ConfigDir, "config.json");
 
@@ -56,10 +57,23 @@ public sealed class TriagentConfig
     {
         if (path.StartsWith('~'))
         {
-            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            var home = GetHomeDirectory();
             return Path.Combine(home, path.TrimStart('~').TrimStart('/', '\\'));
         }
         return path;
+    }
+
+    private static string GetHomeDirectory()
+    {
+        var home = Environment.GetEnvironmentVariable("HOME");
+        if (!string.IsNullOrWhiteSpace(home))
+            return home;
+
+        var fallback = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        if (!string.IsNullOrWhiteSpace(fallback))
+            return fallback;
+
+        throw new InvalidOperationException("Unable to resolve user home directory.");
     }
 }
 

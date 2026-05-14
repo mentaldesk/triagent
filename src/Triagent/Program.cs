@@ -1,4 +1,5 @@
 using System.CommandLine;
+using Sentry;
 using Spectre.Console;
 using Triagent.Commands;
 using Triagent.Config;
@@ -9,7 +10,9 @@ var root = new RootCommand("Triagent — score GitHub issues for AI-agent doabil
 
 // Shared options
 var dbOption = new Option<string?>("--db") { Description = "Override database path." };
+var sentryDsnOption = new Option<string?>("--sentry-dsn") { Description = "Sentry DSN for error reporting/tracing (overrides config.sentryDsn)." };
 root.Add(dbOption);
+root.Add(sentryDsnOption);
 
 // ---- analyze ----
 var analyzeCommand = new Command("analyze", "Fetch open issues and score new/changed ones.");
@@ -230,4 +233,34 @@ root.Add(reposCommand);
 root.Add(reviewCommand);
 root.Add(linkedReposCommand);
 
-return await root.Parse(args).InvokeAsync();
+var parseResult = root.Parse(args);
+
+var sentryDsn = parseResult.GetValue(sentryDsnOption) ?? config.SentryDsn;
+var release = typeof(Program).Assembly.GetName().Version?.ToString();
+
+if (!string.IsNullOrWhiteSpace(sentryDsn))
+{
+    using var sentry = SentrySdk.Init(o =>
+    {
+        o.Dsn = sentryDsn;
+        o.TracesSampleRate = 1.0;
+        o.Release = release;
+    });
+
+    return await InvokeRootAsync(parseResult);
+}
+
+return await InvokeRootAsync(parseResult);
+
+static async Task<int> InvokeRootAsync(ParseResult parseResult)
+{
+    try
+    {
+        return await parseResult.InvokeAsync();
+    }
+    catch (Exception ex)
+    {
+        SentrySdk.CaptureException(ex);
+        throw;
+    }
+}

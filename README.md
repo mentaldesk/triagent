@@ -32,6 +32,23 @@ Manage repo-scoped mappings via CLI:
 This keeps single-repo setups working while preventing cross-repo leakage in
 multi-repo usage.
 
+## Sentry observability
+
+Triagent supports Sentry error capture + performance tracing.
+
+Configure DSN via either:
+
+- CLI (highest priority): `--sentry-dsn <dsn>`
+- Config file: `~/.triagent/config.json` -> `sentryDsn`
+
+Example:
+
+- `triagent analyze getsentry/sentry-dotnet --sentry-dsn https://...@o0.ingest.sentry.io/0`
+
+When configured, `analyze` emits tracing spans for major phases (GitHub fetch,
+DB sync, detail hydration, scoring batches) and captures exceptions with batch
+context.
+
 ## Top filtering
 
 `triagent top` supports these key filters:
