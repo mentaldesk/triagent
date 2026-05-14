@@ -81,8 +81,8 @@ public sealed class ReviewCommandFilterPersistenceTests
     private static async Task SeedIssueAsync(TriagentConfig config, int number)
     {
         await using var db = await IssueDb.OpenAsync(config.ResolvedDbPath);
-        var issue = new GitHubIssueSummary(number, $"Issue {number}", $"https://example/{number}", "", DateTimeOffset.UtcNow, IsAssigned: false);
-        await db.UpsertSummaryAsync("getsentry/sentry-dotnet", issue, hasLinkedPr: false, isAssigned: false);
+        var issue = new GitHubIssueSummary(number, $"Issue {number}", $"https://example/{number}", "", false, "", DateTimeOffset.UtcNow);
+        await db.UpsertSummaryAsync("getsentry/sentry-dotnet", issue, hasLinkedPr: false);
         await db.SaveScoreAsync("getsentry/sentry-dotnet", new IssueScore(number, 3, 3, 3, 3, 3, "ok"), "claude");
     }
 

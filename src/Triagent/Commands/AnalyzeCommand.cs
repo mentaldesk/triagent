@@ -60,7 +60,7 @@ public static class AnalyzeCommand
 
         // Upsert all open issues (including PR-linked ones, so we record them)
         foreach (var issue in openIssues)
-            await db.UpsertSummaryAsync(ownerRepo, issue, linkedToOpenPrs.Contains(issue.Number), issue.IsAssigned, ct);
+            await db.UpsertSummaryAsync(ownerRepo, issue, linkedToOpenPrs.Contains(issue.Number), ct);
 
         // Archive issues that no longer appear in the open listing
         await db.ArchiveClosedAsync(ownerRepo, newlyClosed, ct);

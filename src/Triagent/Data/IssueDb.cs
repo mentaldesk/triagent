@@ -145,7 +145,6 @@ public sealed class IssueDb : IAsyncDisposable
         string repo,
         GitHubIssueSummary summary,
         bool hasLinkedPr,
-        bool? isAssigned = null,
         CancellationToken ct = default)
     {
         await using var cmd = _connection.CreateCommand();
@@ -169,8 +168,7 @@ public sealed class IssueDb : IAsyncDisposable
         cmd.Parameters.AddWithValue("$url", summary.Url);
         cmd.Parameters.AddWithValue("$labels", summary.Labels);
         cmd.Parameters.AddWithValue("$hasLinkedPr", hasLinkedPr ? 1 : 0);
-        var assigned = isAssigned ?? summary.HasAssignees;
-        cmd.Parameters.AddWithValue("$hasAssignees", (summary.HasAssignees || assigned) ? 1 : 0);
+        cmd.Parameters.AddWithValue("$hasAssignees", summary.HasAssignees ? 1 : 0);
         cmd.Parameters.AddWithValue("$assignees", summary.Assignees ?? string.Empty);
         cmd.Parameters.AddWithValue("$updatedAt", summary.UpdatedAt.ToString(DateFormat, CultureInfo.InvariantCulture));
         await cmd.ExecuteNonQueryAsync(ct);

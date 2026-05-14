@@ -46,7 +46,6 @@ public sealed record IssueRow
     public bool HasLinkedPr { get; init; }
     public bool HasAssignees { get; init; }
     public string Assignees { get; init; } = string.Empty;
-    public bool IsAssigned => HasAssignees;
     public required DateTimeOffset GitHubUpdatedAt { get; init; }
     public DateTimeOffset? ClosedAt { get; init; }
     public DateTimeOffset? LastScoredAt { get; init; }
@@ -72,19 +71,7 @@ public sealed record GitHubIssueSummary(
     string Assignees,
     DateTimeOffset UpdatedAt)
 {
-    public bool IsAssigned => HasAssignees;
 
-    // Backward-compatible overload used by older call sites/tests.
-    public GitHubIssueSummary(
-        int number,
-        string title,
-        string url,
-        string labels,
-        DateTimeOffset updatedAt,
-        bool IsAssigned)
-        : this(number, title, url, labels, IsAssigned, string.Empty, updatedAt)
-    {
-    }
 }
 
 public sealed record IssueForScoring(

@@ -203,8 +203,8 @@ public sealed class ReviewCommandUiTests
     private static async Task SeedIssueAsync(TriagentConfig config, string repo, int number, bool scored)
     {
         await using var db = await IssueDb.OpenAsync(config.ResolvedDbPath);
-        var issue = new GitHubIssueSummary(number, $"Issue {number}", $"https://example/{number}", "", DateTimeOffset.UtcNow, IsAssigned: false);
-        await db.UpsertSummaryAsync(repo, issue, hasLinkedPr: false, isAssigned: false);
+        var issue = new GitHubIssueSummary(number, $"Issue {number}", $"https://example/{number}", "", false, "", DateTimeOffset.UtcNow);
+        await db.UpsertSummaryAsync(repo, issue, hasLinkedPr: false);
         if (scored)
             await db.SaveScoreAsync(repo, new IssueScore(number, 3, 3, 3, 3, 3, "ok"), "claude");
     }

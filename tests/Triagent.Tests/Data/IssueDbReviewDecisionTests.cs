@@ -12,8 +12,8 @@ public sealed class IssueDbReviewDecisionTests
         var dbPath = TempDbPath();
         await using var db = await IssueDb.OpenAsync(dbPath);
 
-        var issue = new GitHubIssueSummary(13, "Add review UI", "https://example.test/13", "enhancement", DateTimeOffset.UtcNow, IsAssigned: false);
-        await db.UpsertSummaryAsync("mentaldesk/triagent", issue, hasLinkedPr: false, isAssigned: false);
+        var issue = new GitHubIssueSummary(13, "Add review UI", "https://example.test/13", "enhancement", false, "", DateTimeOffset.UtcNow);
+        await db.UpsertSummaryAsync("mentaldesk/triagent", issue, hasLinkedPr: false);
 
         var ex = await Assert.ThrowsAsync<ArgumentException>(() =>
             db.SaveReviewDecisionAsync("mentaldesk/triagent", 13, ReviewDecision.Skip, null));
@@ -27,8 +27,8 @@ public sealed class IssueDbReviewDecisionTests
         var dbPath = TempDbPath();
         await using var db = await IssueDb.OpenAsync(dbPath);
 
-        var issue = new GitHubIssueSummary(13, "Add review UI", "https://example.test/13", "enhancement", DateTimeOffset.UtcNow, IsAssigned: false);
-        await db.UpsertSummaryAsync("mentaldesk/triagent", issue, hasLinkedPr: false, isAssigned: false);
+        var issue = new GitHubIssueSummary(13, "Add review UI", "https://example.test/13", "enhancement", false, "", DateTimeOffset.UtcNow);
+        await db.UpsertSummaryAsync("mentaldesk/triagent", issue, hasLinkedPr: false);
         await db.SaveScoreAsync("mentaldesk/triagent", new IssueScore(13, 4, 4, 4, 4, 4, "clear task"), "claude");
 
         await db.SaveReviewDecisionAsync("mentaldesk/triagent", 13, ReviewDecision.Try, null);
@@ -52,8 +52,8 @@ public sealed class IssueDbReviewDecisionTests
         var dbPath = TempDbPath();
         await using var db = await IssueDb.OpenAsync(dbPath);
 
-        var issue = new GitHubIssueSummary(13, "Add review UI", "https://example.test/13", "enhancement", DateTimeOffset.UtcNow, IsAssigned: false);
-        await db.UpsertSummaryAsync("mentaldesk/triagent", issue, hasLinkedPr: false, isAssigned: false);
+        var issue = new GitHubIssueSummary(13, "Add review UI", "https://example.test/13", "enhancement", false, "", DateTimeOffset.UtcNow);
+        await db.UpsertSummaryAsync("mentaldesk/triagent", issue, hasLinkedPr: false);
 
         await db.SaveReviewDecisionAsync("mentaldesk/triagent", 13, ReviewDecision.Skip, "not now");
         await db.SaveReviewDecisionAsync("mentaldesk/triagent", 13, ReviewDecision.None, null);
@@ -71,10 +71,10 @@ public sealed class IssueDbReviewDecisionTests
         var dbPath = TempDbPath();
         await using var db = await IssueDb.OpenAsync(dbPath);
 
-        await db.UpsertSummaryAsync("mentaldesk/triagent", new GitHubIssueSummary(1, "A", "https://example/1", "", DateTimeOffset.UtcNow, IsAssigned: false), hasLinkedPr: false, isAssigned: false);
-        await db.UpsertSummaryAsync("mentaldesk/triagent", new GitHubIssueSummary(2, "B", "https://example/2", "", DateTimeOffset.UtcNow, IsAssigned: false), hasLinkedPr: true, isAssigned: false);
-        await db.UpsertSummaryAsync("mentaldesk/triagent", new GitHubIssueSummary(3, "C", "https://example/3", "", DateTimeOffset.UtcNow, IsAssigned: false), hasLinkedPr: false, isAssigned: false);
-        await db.UpsertSummaryAsync("mentaldesk/triagent", new GitHubIssueSummary(4, "D", "https://example/4", "", DateTimeOffset.UtcNow, IsAssigned: true), hasLinkedPr: false, isAssigned: true);
+        await db.UpsertSummaryAsync("mentaldesk/triagent", new GitHubIssueSummary(1, "A", "https://example/1", "", false, "", DateTimeOffset.UtcNow), hasLinkedPr: false);
+        await db.UpsertSummaryAsync("mentaldesk/triagent", new GitHubIssueSummary(2, "B", "https://example/2", "", false, "", DateTimeOffset.UtcNow), hasLinkedPr: true);
+        await db.UpsertSummaryAsync("mentaldesk/triagent", new GitHubIssueSummary(3, "C", "https://example/3", "", false, "", DateTimeOffset.UtcNow), hasLinkedPr: false);
+        await db.UpsertSummaryAsync("mentaldesk/triagent", new GitHubIssueSummary(4, "D", "https://example/4", "", true, "", DateTimeOffset.UtcNow), hasLinkedPr: false);
 
         await db.SaveScoreAsync("mentaldesk/triagent", new IssueScore(1, 4, 4, 4, 4, 4, "A"), "claude");
         await db.SaveScoreAsync("mentaldesk/triagent", new IssueScore(3, 2, 2, 2, 2, 2, "C"), "claude");
