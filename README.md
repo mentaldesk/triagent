@@ -9,6 +9,30 @@ See [DESIGN.md](DESIGN.md) for the full design.
 
 Early scaffolding. Not yet usable.
 
+## Install
+
+Triagent is packaged as a .NET global tool. Once published, install with:
+
+```
+dotnet tool install --global Triagent
+```
+
+To build and install from a local clone:
+
+```
+dotnet pack src/Triagent/Triagent.csproj -c Release -o ./nupkg
+dotnet tool install --global --add-source ./nupkg Triagent
+```
+
+Then run `triagent --help`. Ensure `~/.dotnet/tools` is on your `PATH`.
+
+To update or uninstall:
+
+```
+dotnet tool update --global Triagent
+dotnet tool uninstall --global Triagent
+```
+
 ## Dev launcher
 
 Use `./dev.cs` from the repo root as a shorthand for:
