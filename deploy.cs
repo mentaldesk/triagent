@@ -8,8 +8,11 @@ nupkg_dir="$repo_root/nupkg"
 rm -rf "$nupkg_dir"
 dotnet pack "$project_path" -c Release -o "$nupkg_dir"
 
+# Uninstall first so the install always picks up the freshly-packed bits.
+# `dotnet tool update` is a no-op when the package version is unchanged,
+# which is the common case during local development.
 if dotnet tool list --global | awk '{print $1}' | grep -qi '^triagent$'; then
-  dotnet tool update --global --add-source "$nupkg_dir" --no-cache Triagent
-else
-  dotnet tool install --global --add-source "$nupkg_dir" --no-cache Triagent
+  dotnet tool uninstall --global Triagent
 fi
+
+dotnet tool install --global --add-source "$nupkg_dir" --no-cache Triagent
