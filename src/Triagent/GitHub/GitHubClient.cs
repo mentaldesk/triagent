@@ -1,25 +1,33 @@
 using System.Diagnostics;
 using Octokit;
+using Octokit.GraphQL;
+using Octokit.GraphQL.Model;
 using Sentry;
 using Triagent.Models;
+using static Octokit.GraphQL.Variable;
 
 namespace Triagent.GitHub;
 
 public sealed class GitHubClient
 {
     private readonly Octokit.GitHubClient _client;
+    private readonly Octokit.GraphQL.Connection? _graphql;
 
     public GitHubClient()
     {
-        _client = new Octokit.GitHubClient(new ProductHeaderValue("triagent"));
+        _client = new Octokit.GitHubClient(new Octokit.ProductHeaderValue("triagent"));
         var token = ResolveToken();
         if (!string.IsNullOrEmpty(token))
+        {
             _client.Credentials = new Credentials(token);
+            _graphql = new Octokit.GraphQL.Connection(
+                new Octokit.GraphQL.ProductHeaderValue("triagent"), token);
+        }
     }
 
     private static string? ResolveToken()
     {
-        var env = Environment.GetEnvironmentVariable("GITHUB_TOKEN");
+        var env = System.Environment.GetEnvironmentVariable("GITHUB_TOKEN");
         if (!string.IsNullOrWhiteSpace(env)) return env.Trim();
 
         try
@@ -96,52 +104,105 @@ public sealed class GitHubClient
         IReadOnlyCollection<string>? linkedRepoScope = null,
         CancellationToken ct = default)
     {
-        var linked = new HashSet<int>();
-        var allowedRepos = (linkedRepoScope ?? Array.Empty<string>())
+        if (_graphql is null)
+            throw new InvalidOperationException("GitHub token is required to query linked PRs.");
+
+        var sourceRepos = (linkedRepoScope ?? Array.Empty<string>())
             .Where(r => !string.IsNullOrWhiteSpace(r))
             .Select(r => r.Trim())
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
-        if (allowedRepos.Count == 0)
-            allowedRepos.Add($"{owner}/{repo}");
+        if (sourceRepos.Count == 0)
+            sourceRepos.Add($"{owner}/{repo}");
 
-        foreach (var issueNumber in issueNumbers)
+        var targetRepo = $"{owner}/{repo}";
+        var openIssueSet = issueNumbers.ToHashSet();
+        var linked = new HashSet<int>();
+
+        foreach (var prRepoFull in sourceRepos)
         {
-            var timeline = await _client.Issue.Timeline.GetAllForIssue(owner, repo, issueNumber, new ApiOptions { PageSize = 100 });
+            var parts = prRepoFull.Split('/', 2);
+            if (parts.Length != 2) continue;
+            var prOwner = parts[0];
+            var prName = parts[1];
 
-            foreach (var ev in timeline)
-            {
-                if (ev.Event != EventInfoState.Crossreferenced) continue;
-                if (ev.Source?.Issue?.PullRequest is null) continue;
-                if (ev.Source.Issue.State != ItemState.Open) continue;
-
-                var sourceRepo = TryGetOwnerRepoFromIssueApiUrl(ev.Source.Issue.Url);
-
-                if (sourceRepo is not null && allowedRepos.Contains(sourceRepo))
-                {
-                    linked.Add(issueNumber);
-                    break;
-                }
-            }
+            await FetchLinkedFromRepoAsync(prOwner, prName, targetRepo, openIssueSet, linked, ct);
         }
 
         return linked;
     }
 
-    private static string? TryGetOwnerRepoFromIssueApiUrl(string? issueApiUrl)
+    private async Task FetchLinkedFromRepoAsync(
+        string prOwner,
+        string prName,
+        string targetRepo,
+        HashSet<int> openIssueSet,
+        HashSet<int> linked,
+        CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(issueApiUrl)) return null;
-        if (!Uri.TryCreate(issueApiUrl, UriKind.Absolute, out var uri)) return null;
+        var query = new Query()
+            .Repository(name: Var("name"), owner: Var("owner"))
+            .PullRequests(first: 100, after: Var("after"), states: new[] { PullRequestState.Open })
+            .Select(prs => new Page
+            {
+                HasNextPage = prs.PageInfo.HasNextPage,
+                EndCursor = prs.PageInfo.EndCursor,
+                Prs = prs.Nodes.Select(pr => new PrRefs
+                {
+                    Refs = pr.ClosingIssuesReferences(first: 50, after: null, last: null, before: null, orderBy: null, userLinkedOnly: null)
+                              .Nodes
+                              .Select(i => new IssueRef
+                              {
+                                  Number = i.Number,
+                                  NameWithOwner = i.Repository.NameWithOwner,
+                              }).ToList(),
+                }).ToList(),
+            })
+            .Compile();
 
-        var segments = uri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
-        // Expected: repos/{owner}/{repo}/issues/{number}
-        if (segments.Length < 4) return null;
-        if (!string.Equals(segments[0], "repos", StringComparison.OrdinalIgnoreCase)) return null;
+        var vars = new Dictionary<string, object?>
+        {
+            ["owner"] = prOwner,
+            ["name"] = prName,
+            ["after"] = null,
+        };
 
-        var owner = segments[1];
-        var repo = segments[2];
-        if (string.IsNullOrWhiteSpace(owner) || string.IsNullOrWhiteSpace(repo)) return null;
+        while (true)
+        {
+            ct.ThrowIfCancellationRequested();
+            var page = await _graphql!.Run(query, vars, cancellationToken: ct);
 
-        return $"{owner}/{repo}";
+            foreach (var pr in page.Prs)
+            {
+                foreach (var r in pr.Refs)
+                {
+                    if (!string.Equals(r.NameWithOwner, targetRepo, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (!openIssueSet.Contains(r.Number)) continue;
+                    linked.Add(r.Number);
+                }
+            }
+
+            if (!page.HasNextPage || string.IsNullOrEmpty(page.EndCursor)) break;
+            vars["after"] = page.EndCursor;
+        }
+    }
+
+    private sealed class Page
+    {
+        public bool HasNextPage { get; set; }
+        public string? EndCursor { get; set; }
+        public List<PrRefs> Prs { get; set; } = new();
+    }
+
+    private sealed class PrRefs
+    {
+        public List<IssueRef> Refs { get; set; } = new();
+    }
+
+    private sealed class IssueRef
+    {
+        public int Number { get; set; }
+        public string NameWithOwner { get; set; } = "";
     }
 }
