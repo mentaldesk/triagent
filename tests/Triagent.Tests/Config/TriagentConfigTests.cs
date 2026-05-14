@@ -1,37 +1,57 @@
 using Triagent.Config;
+using Triagent.Tests.Support;
 using Xunit;
 
 namespace Triagent.Tests.Config;
 
-[Collection("ConfigIsolation")]
 public sealed class TriagentConfigTests
 {
     [Fact]
-    public void ConfigPath_UsesHomeEnvironmentVariable_WhenSet()
+    public void Load_WithExplicitPath_CreatesDefaultsWhenMissing()
     {
-        using var home = new TempHomeScope();
+        using var configFile = new TempConfigFile();
+        Assert.False(File.Exists(configFile.Path));
 
-        var expected = Path.Combine(home.Home, ".triagent", "config.json");
-        Assert.Equal(expected, TriagentConfig.ConfigPath);
+        var config = TriagentConfig.Load(configFile.Path);
+
+        Assert.True(File.Exists(configFile.Path));
+        Assert.Equal(configFile.Path, config.SourcePath);
+        Assert.Equal("claude", config.DefaultScorer);
     }
 
-    private sealed class TempHomeScope : IDisposable
+    [Fact]
+    public void Save_AndLoad_RoundTripsThroughExplicitPath()
     {
-        private readonly string? _oldHome;
-        public string Home { get; }
+        using var configFile = new TempConfigFile();
 
-        public TempHomeScope()
-        {
-            _oldHome = Environment.GetEnvironmentVariable("HOME");
-            Home = Path.Combine(Path.GetTempPath(), $"triagent-home-{Guid.NewGuid():N}");
-            Directory.CreateDirectory(Home);
-            Environment.SetEnvironmentVariable("HOME", Home);
-        }
+        var saved = new TriagentConfig { DefaultRepo = "owner/repo", ReviewFilter = "skip" };
+        TriagentConfig.Save(saved, configFile.Path);
 
-        public void Dispose()
-        {
-            Environment.SetEnvironmentVariable("HOME", _oldHome);
-            try { Directory.Delete(Home, recursive: true); } catch { }
-        }
+        Assert.Equal(configFile.Path, saved.SourcePath);
+
+        var loaded = TriagentConfig.Load(configFile.Path);
+        Assert.Equal("owner/repo", loaded.DefaultRepo);
+        Assert.Equal("skip", loaded.ReviewFilter);
+        Assert.Equal(configFile.Path, loaded.SourcePath);
+    }
+
+    [Fact]
+    public void InstanceSave_WritesBackToSourcePath()
+    {
+        using var configFile = new TempConfigFile();
+
+        var config = TriagentConfig.Load(configFile.Path);
+        config.DefaultRepo = "owner/changed";
+        config.Save();
+
+        var reloaded = TriagentConfig.Load(configFile.Path);
+        Assert.Equal("owner/changed", reloaded.DefaultRepo);
+    }
+
+    [Fact]
+    public void InstanceSave_ThrowsWhenSourcePathUnset()
+    {
+        var config = new TriagentConfig();
+        Assert.Throws<InvalidOperationException>(() => config.Save());
     }
 }

@@ -1,5 +1,6 @@
 using Triagent.Data;
 using Triagent.Models;
+using Triagent.Tests.Support;
 using Xunit;
 
 namespace Triagent.Tests.Data;
@@ -9,8 +10,8 @@ public sealed class IssueDbReviewDecisionRepoScopeTests
     [Fact]
     public async Task SaveReviewDecision_UpdatesOnlyMatchingRepoAndNumber()
     {
-        var dbPath = TempDbPath();
-        await using var db = await IssueDb.OpenAsync(dbPath);
+        await using var temp = new TempDb();
+        await using var db = await temp.OpenAsync();
 
         await SeedScoredIssue(db, "getsentry/sentry-dotnet", 5058);
         await SeedScoredIssue(db, "mentaldesk/triagent", 5058);
@@ -32,8 +33,8 @@ public sealed class IssueDbReviewDecisionRepoScopeTests
     [Fact]
     public async Task SaveReviewDecision_ThrowsWhenRowDoesNotExist()
     {
-        var dbPath = TempDbPath();
-        await using var db = await IssueDb.OpenAsync(dbPath);
+        await using var temp = new TempDb();
+        await using var db = await temp.OpenAsync();
 
         await SeedScoredIssue(db, "getsentry/sentry-dotnet", 5058);
 
@@ -49,6 +50,4 @@ public sealed class IssueDbReviewDecisionRepoScopeTests
         await db.UpsertSummaryAsync(repo, issue, hasLinkedPr: false, isAssigned: false);
         await db.SaveScoreAsync(repo, new IssueScore(number, 3, 3, 3, 3, 3, "ok"), "claude");
     }
-
-    private static string TempDbPath() => Path.Combine(Path.GetTempPath(), $"triagent-tests-{Guid.NewGuid():N}.db");
 }

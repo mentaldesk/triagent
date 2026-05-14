@@ -89,7 +89,7 @@ public static class ReviewCommand
         void PersistFilter()
         {
             config.ReviewFilter = FilterToConfigValue(activeFilter);
-            TriagentConfig.Save(config);
+            config.Save();
         }
 
         void RefreshList(string? preferredRepo = null, int preferredIssueNumber = -1)

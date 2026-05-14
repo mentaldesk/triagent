@@ -220,7 +220,7 @@ public static class AnalyzeCommand
         }
     }
 
-    private static async Task<IReadOnlyList<string>> ResolveLinkedRepoScopeAsync(
+    internal static async Task<IReadOnlyList<string>> ResolveLinkedRepoScopeAsync(
         string ownerRepo,
         TriagentConfig config,
         IssueDb db,
@@ -254,7 +254,7 @@ public static class AnalyzeCommand
         return scope;
     }
 
-    private static bool NeedsScoring(
+    internal static bool NeedsScoring(
         GitHubIssueSummary issue,
         IReadOnlyDictionary<int, (string State, DateTimeOffset? LastScoredAt, DateTimeOffset GitHubUpdatedAt)> dbState)
     {
