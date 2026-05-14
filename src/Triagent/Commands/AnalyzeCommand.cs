@@ -1,3 +1,6 @@
+using System.ComponentModel;
+using System.Diagnostics;
+using Octokit;
 using Spectre.Console;
 using Triagent.Config;
 using Triagent.Data;
@@ -27,7 +30,11 @@ public static class AnalyzeCommand
             _ => throw new ArgumentException($"Unknown scorer '{scorerName}'. Use claude or codex.")
         };
 
+        EnsureScorerCliAvailable(scorer.Name);
+
         var gh = new GitHub.GitHubClient();
+        await EnsureGitHubAuthAsync(gh, ct);
+
         await using var db = await IssueDb.OpenAsync(config.ResolvedDbPath, ct);
 
         AnsiConsole.MarkupLine($"[bold]Triagent[/] analyzing [yellow]{ownerRepo}[/] with scorer [green]{scorer.Name}[/]");
@@ -36,10 +43,9 @@ public static class AnalyzeCommand
             .StartAsync("Listing open issues...", _ => gh.GetAllOpenIssuesAsync(owner, repo, ct));
         AnsiConsole.MarkupLine($"  Found [cyan]{openIssues.Count}[/] open issues");
 
-        var prLinkRepos = ResolvePrLinkRepos(owner, repo, config.LinkedPrRepos);
         var linkedToOpenPrs = await AnsiConsole.Status()
-            .StartAsync($"Checking open PRs for linked issues across {prLinkRepos.Count} repo(s)...",
-                _ => gh.GetIssuesLinkedToOpenPullRequestsAsync(prLinkRepos, ct));
+            .StartAsync("Checking issue timeline for associated open PRs...",
+                _ => gh.GetIssuesLinkedToOpenPullRequestsAsync(owner, repo, openIssues.Select(i => i.Number).ToList(), ct));
         AnsiConsole.MarkupLine($"  [cyan]{linkedToOpenPrs.Count}[/] issues linked from open PRs");
 
         // Snapshot current DB state for sync decisions
@@ -54,7 +60,7 @@ public static class AnalyzeCommand
 
         // Upsert all open issues (including PR-linked ones, so we record them)
         foreach (var issue in openIssues)
-            await db.UpsertSummaryAsync(ownerRepo, issue, linkedToOpenPrs.Contains(issue.Number), ct);
+            await db.UpsertSummaryAsync(ownerRepo, issue, linkedToOpenPrs.Contains(issue.Number), issue.IsAssigned, ct);
 
         // Archive issues that no longer appear in the open listing
         await db.ArchiveClosedAsync(ownerRepo, newlyClosed, ct);
@@ -147,38 +153,71 @@ public static class AnalyzeCommand
         return issue.UpdatedAt > existing.LastScoredAt.Value;
     }
 
-    private static List<(string Owner, string Repo)> ResolvePrLinkRepos(
-        string owner,
-        string repo,
-        IReadOnlyList<string>? configured)
-    {
-        var target = (Owner: owner, Repo: repo);
-
-        if (configured is null || configured.Count == 0)
-            return new List<(string Owner, string Repo)> { target };
-
-        var resolved = new List<(string Owner, string Repo)>();
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var entry in configured)
-        {
-            if (string.IsNullOrWhiteSpace(entry)) continue;
-            var (o, r) = SplitRepo(entry.Trim());
-            var key = $"{o}/{r}";
-            if (seen.Add(key)) resolved.Add((o, r));
-        }
-
-        var targetKey = $"{owner}/{repo}";
-        if (seen.Add(targetKey)) resolved.Add(target);
-
-        return resolved;
-    }
-
     private static (string Owner, string Repo) SplitRepo(string ownerRepo)
     {
         var parts = ownerRepo.Split('/');
         if (parts.Length != 2 || parts.Any(string.IsNullOrWhiteSpace))
             throw new ArgumentException($"repo must be in the form owner/name, got '{ownerRepo}'");
         return (parts[0], parts[1]);
+    }
+
+    private static async Task EnsureGitHubAuthAsync(GitHub.GitHubClient gh, CancellationToken ct)
+    {
+        try
+        {
+            // Lightweight call to validate authenticated GitHub access before full analyze.
+            await gh.GetAllOpenIssuesAsync("octokit", "octokit.net", ct);
+        }
+        catch (Octokit.RateLimitExceededException ex)
+        {
+            throw new InvalidOperationException(
+                "GitHub API rate limit exceeded before analysis started. This usually means unauthenticated requests. " +
+                "Set GITHUB_TOKEN or run `gh auth login` so Triagent can use authenticated GitHub API requests.", ex);
+        }
+        catch (Octokit.AuthorizationException ex)
+        {
+            throw new InvalidOperationException(
+                "GitHub authentication failed. Set a valid GITHUB_TOKEN or run `gh auth login`.", ex);
+        }
+    }
+
+    private static void EnsureScorerCliAvailable(string scorerName)
+    {
+        var executable = scorerName.ToLowerInvariant() switch
+        {
+            "claude" => "claude",
+            "codex" => "codex",
+            _ => scorerName,
+        };
+
+        try
+        {
+            var psi = new ProcessStartInfo
+            {
+                FileName = executable,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+            };
+            psi.ArgumentList.Add("--version");
+
+            using var proc = Process.Start(psi)
+                ?? throw new InvalidOperationException($"Failed to start '{executable}'.");
+
+            proc.WaitForExit(3000);
+
+            if (proc.HasExited && proc.ExitCode == 0)
+                return;
+
+            var stderr = proc.StandardError.ReadToEnd().Trim();
+            throw new InvalidOperationException(
+                $"{executable} is installed but not runnable (exit {proc.ExitCode}). {stderr}".Trim());
+        }
+        catch (Exception ex) when (ex is Win32Exception || ex is InvalidOperationException)
+        {
+            throw new InvalidOperationException(
+                $"Scorer CLI '{executable}' is not available. Install it, ensure it's on PATH, and authenticate it before running analyze with --scorer {scorerName}.",
+                ex);
+        }
     }
 }

@@ -141,11 +141,25 @@ reposCommand.SetAction(async (parseResult, ct) =>
     return await ReposCommand.RunAsync(config, ct);
 });
 
+// ---- review ----
+var reviewCommand = new Command("review", "Launch interactive triage review UI.");
+var reviewRepoOpt = new Option<string?>("--repo") { Description = "Filter review queue to a single repo." };
+reviewCommand.Add(reviewRepoOpt);
+reviewCommand.SetAction(async (parseResult, ct) =>
+{
+    var dbOverride = parseResult.GetValue(dbOption);
+    if (dbOverride is not null) config.DbPath = dbOverride;
+
+    var repo = parseResult.GetValue(reviewRepoOpt) ?? config.DefaultRepo;
+    return await ReviewCommand.RunAsync(repo, config, ct);
+});
+
 root.Add(analyzeCommand);
 root.Add(topCommand);
 root.Add(showCommand);
 root.Add(statsCommand);
 root.Add(exportCommand);
 root.Add(reposCommand);
+root.Add(reviewCommand);
 
 return await root.Parse(args).InvokeAsync();
