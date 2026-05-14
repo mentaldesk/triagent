@@ -9,6 +9,29 @@ See [DESIGN.md](DESIGN.md) for the full design.
 
 Early scaffolding. Not yet usable.
 
+## Linked PR repo scope
+
+Linked PR repo mappings are stored per analyzed target repo in the local DB.
+
+Behavior:
+
+- Primary source: repo-scoped DB settings (`target repo -> linked repos`)
+- Fallback/migration: if no repo-scoped mapping exists yet, Triagent uses
+  `linkedPrRepos` from `~/.triagent/config.json` once and persists it for that
+  target repo.
+
+Manage repo-scoped mappings via CLI:
+
+- `triagent linked-repos list --repo owner/target`
+- `triagent linked-repos set --repo owner/target owner/docs owner/tools`
+- `triagent linked-repos add --repo owner/target owner/new-repo`
+- `triagent linked-repos remove --repo owner/target owner/docs`
+
+`--repo` defaults to `defaultRepo` from config.
+
+This keeps single-repo setups working while preventing cross-repo leakage in
+multi-repo usage.
+
 ## Top filtering
 
 `triagent top` supports these key filters:

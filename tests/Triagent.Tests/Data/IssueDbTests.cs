@@ -7,6 +7,29 @@ namespace Triagent.Tests.Data;
 public sealed class IssueDbTests
 {
     [Fact]
+    public async Task LinkedPrRepos_AreStoredPerRepo()
+    {
+        var dbPath = Path.Combine(Path.GetTempPath(), $"triagent-tests-{Guid.NewGuid():N}.db");
+        try
+        {
+            await using var db = await IssueDb.OpenAsync(dbPath);
+
+            await db.SetLinkedPrReposAsync("owner/repo-a", new[] { "owner/docs-a" });
+            await db.SetLinkedPrReposAsync("owner/repo-b", new[] { "owner/docs-b", "owner/tools-b" });
+
+            var a = await db.GetLinkedPrReposAsync("owner/repo-a");
+            var b = await db.GetLinkedPrReposAsync("owner/repo-b");
+
+            Assert.Equal(new[] { "owner/docs-a" }, a);
+            Assert.Equal(new[] { "owner/docs-b", "owner/tools-b" }, b);
+        }
+        finally
+        {
+            if (File.Exists(dbPath)) File.Delete(dbPath);
+        }
+    }
+
+    [Fact]
     public async Task QueryTopAsync_ExcludeAssigned_FiltersAssignedOnlyWhenEnabled()
     {
         var dbPath = Path.Combine(Path.GetTempPath(), $"triagent-tests-{Guid.NewGuid():N}.db");

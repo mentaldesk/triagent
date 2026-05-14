@@ -81,6 +81,19 @@ public sealed class IssueDb : IAsyncDisposable
             await migrateLegacy.ExecuteNonQueryAsync(ct);
         }
 
+        const string createRepoSettingsSql = """
+            CREATE TABLE IF NOT EXISTS repo_settings (
+              repo                 TEXT    NOT NULL PRIMARY KEY,
+              linked_pr_repos      TEXT    NOT NULL DEFAULT ''
+            );
+            """;
+
+        await using (var createRepoSettingsCmd = _connection.CreateCommand())
+        {
+            createRepoSettingsCmd.CommandText = createRepoSettingsSql;
+            await createRepoSettingsCmd.ExecuteNonQueryAsync(ct);
+        }
+
         const string indexSql = """
             CREATE INDEX IF NOT EXISTS idx_issues_total ON issues(repo, state, total DESC);
             CREATE INDEX IF NOT EXISTS idx_issues_state ON issues(repo, state);
@@ -335,6 +348,43 @@ public sealed class IssueDb : IAsyncDisposable
         while (await reader.ReadAsync(ct))
             repos.Add($"{reader.GetString(0)} ({reader.GetInt64(1)} issues)");
         return repos;
+    }
+
+    public async Task<IReadOnlyList<string>> GetLinkedPrReposAsync(string repo, CancellationToken ct = default)
+    {
+        await using var cmd = _connection.CreateCommand();
+        cmd.CommandText = "SELECT linked_pr_repos FROM repo_settings WHERE repo = $repo";
+        cmd.Parameters.AddWithValue("$repo", repo);
+
+        var raw = await cmd.ExecuteScalarAsync(ct) as string;
+        if (string.IsNullOrWhiteSpace(raw)) return Array.Empty<string>();
+
+        return raw
+            .Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    public async Task SetLinkedPrReposAsync(string repo, IReadOnlyCollection<string> linkedPrRepos, CancellationToken ct = default)
+    {
+        var normalized = linkedPrRepos
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .Select(s => s.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(s => s, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var serialized = string.Join('\n', normalized);
+
+        await using var cmd = _connection.CreateCommand();
+        cmd.CommandText = """
+            INSERT INTO repo_settings (repo, linked_pr_repos)
+            VALUES ($repo, $linkedPrRepos)
+            ON CONFLICT(repo) DO UPDATE SET linked_pr_repos = excluded.linked_pr_repos
+            """;
+        cmd.Parameters.AddWithValue("$repo", repo);
+        cmd.Parameters.AddWithValue("$linkedPrRepos", serialized);
+        await cmd.ExecuteNonQueryAsync(ct);
     }
 
     public async ValueTask DisposeAsync() => await _connection.DisposeAsync();
