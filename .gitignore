@@ -12,6 +12,8 @@ out/
 *.dll
 *.pdb
 *.exe
+nupkg/
+*.nupkg
 
 # Local DB / config
 *.db

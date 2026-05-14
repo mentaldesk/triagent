@@ -35,15 +35,18 @@ dotnet tool uninstall --global Triagent
 
 ## Dev launcher
 
-Use `./dev.cs` from the repo root as a shorthand for:
+Use `./run.cs` from the repo root as a shorthand for:
 
 - `dotnet run --project src/Triagent/Triagent.csproj -- ...`
 
 Examples:
 
-- `./dev.cs analyze getsentry/sentry-dotnet`
-- `./dev.cs review`
-- `./dev.cs top 20 --state all`
+- `./run.cs analyze getsentry/sentry-dotnet`
+- `./run.cs review`
+- `./run.cs top 20 --state all`
+
+To pack the current working tree and install/update it as a global `triagent`
+tool, use `./deploy.cs` from the repo root.
 
 ## Linked PR repo scope
 
@@ -87,11 +90,11 @@ context.
 
 For quick SDK diagnostics (without waiting for analyze), run any command with:
 
-- `./dev.cs stats --sentry-debug`
+- `./run.cs stats --sentry-debug`
 
 You can also enable debug logging via env var:
 
-- `SENTRY_DEBUG=1 ./dev.cs stats`
+- `SENTRY_DEBUG=1 ./run.cs stats`
 
 ## Top filtering
 
