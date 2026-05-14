@@ -10,12 +10,12 @@ public sealed class AnalyzeCommandTests
     public void NeedsScoring_WhenIssueNotInDb_ReturnsTrue()
     {
         var issue = new GitHubIssueSummary(
-            Number: 13,
-            Title: "Test",
-            Url: "https://example/13",
-            Labels: "",
-            UpdatedAt: DateTimeOffset.UtcNow,
-            IsAssigned: false);
+            13,
+            "Test",
+            "https://example/13",
+            "",
+            DateTimeOffset.UtcNow,
+            false);
 
         var dbState = new Dictionary<int, (string State, DateTimeOffset? LastScoredAt, DateTimeOffset GitHubUpdatedAt)>();
 

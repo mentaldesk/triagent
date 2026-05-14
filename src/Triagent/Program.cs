@@ -57,11 +57,13 @@ var topRepoOpt = new Option<string?>("--repo") { Description = "Filter to a sing
 var topStateOpt = new Option<string>("--state") { Description = "open | closed | all", DefaultValueFactory = _ => "open" };
 var topMinOpt = new Option<int?>("--min-score") { Description = "Only show issues with total >= this." };
 var topLabelOpt = new Option<string?>("--label") { Description = "Filter by label substring." };
+var topExcludeAssignedOpt = new Option<bool>("--exclude-assigned") { Description = "Exclude issues that currently have one or more assignees." };
 topCommand.Add(topLimitArg);
 topCommand.Add(topRepoOpt);
 topCommand.Add(topStateOpt);
 topCommand.Add(topMinOpt);
 topCommand.Add(topLabelOpt);
+topCommand.Add(topExcludeAssignedOpt);
 topCommand.SetAction(async (parseResult, ct) =>
 {
     var dbOverride = parseResult.GetValue(dbOption);
@@ -73,6 +75,7 @@ topCommand.SetAction(async (parseResult, ct) =>
         parseResult.GetValue(topStateOpt)!,
         parseResult.GetValue(topMinOpt),
         parseResult.GetValue(topLabelOpt),
+        parseResult.GetValue(topExcludeAssignedOpt),
         config,
         ct);
 });

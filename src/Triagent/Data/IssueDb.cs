@@ -4,18 +4,12 @@ using Triagent.Models;
 
 namespace Triagent.Data;
 
-/// <summary>
-/// SQLite-backed store for issues + scores. One row per (repo, issue number).
-/// </summary>
 public sealed class IssueDb : IAsyncDisposable
 {
-    private const string DateFormat = "o"; // ISO 8601 round-trip
+    private const string DateFormat = "o";
     private readonly SqliteConnection _connection;
 
-    private IssueDb(SqliteConnection connection)
-    {
-        _connection = connection;
-    }
+    private IssueDb(SqliteConnection connection) => _connection = connection;
 
     public static async Task<IssueDb> OpenAsync(string path, CancellationToken ct = default)
     {
@@ -41,7 +35,8 @@ public sealed class IssueDb : IAsyncDisposable
               labels               TEXT    NOT NULL DEFAULT '',
               state                TEXT    NOT NULL,
               has_linked_pr        INTEGER NOT NULL DEFAULT 0,
-              is_assigned          INTEGER NOT NULL DEFAULT 0,
+              has_assignees        INTEGER NOT NULL DEFAULT 0,
+              assignees            TEXT    NOT NULL DEFAULT '',
               github_updated_at    TEXT    NOT NULL,
               closed_at            TEXT,
               last_scored_at       TEXT,
@@ -69,7 +64,22 @@ public sealed class IssueDb : IAsyncDisposable
         await TryAddColumnAsync("ALTER TABLE issues ADD COLUMN review_decision TEXT", ct);
         await TryAddColumnAsync("ALTER TABLE issues ADD COLUMN review_reason TEXT", ct);
         await TryAddColumnAsync("ALTER TABLE issues ADD COLUMN decided_at TEXT", ct);
-        await TryAddColumnAsync("ALTER TABLE issues ADD COLUMN is_assigned INTEGER NOT NULL DEFAULT 0", ct);
+
+        // Backward compatibility for older DBs.
+        await EnsureColumnAsync("issues", "has_assignees", "INTEGER NOT NULL DEFAULT 0", ct);
+        await EnsureColumnAsync("issues", "assignees", "TEXT NOT NULL DEFAULT ''", ct);
+
+        // Backward compatibility from earlier in this branch where is_assigned existed.
+        var hasLegacyIsAssigned = await HasColumnAsync("issues", "is_assigned", ct);
+        if (hasLegacyIsAssigned)
+        {
+            await using var migrateLegacy = _connection.CreateCommand();
+            migrateLegacy.CommandText = """
+                UPDATE issues
+                SET has_assignees = CASE WHEN has_assignees = 1 OR is_assigned = 1 THEN 1 ELSE 0 END
+                """;
+            await migrateLegacy.ExecuteNonQueryAsync(ct);
+        }
 
         const string indexSql = """
             CREATE INDEX IF NOT EXISTS idx_issues_total ON issues(repo, state, total DESC);
@@ -92,13 +102,10 @@ public sealed class IssueDb : IAsyncDisposable
         }
         catch (SqliteException ex) when (ex.SqliteErrorCode == 1 && ex.Message.Contains("duplicate column name", StringComparison.OrdinalIgnoreCase))
         {
-            // Column already exists in this DB; that's fine.
+            // Already exists.
         }
     }
 
-    /// <summary>
-    /// Returns the existing row for a single issue, or null.
-    /// </summary>
     public async Task<IssueRow?> GetAsync(string repo, int number, CancellationToken ct = default)
     {
         await using var cmd = _connection.CreateCommand();
@@ -111,10 +118,6 @@ public sealed class IssueDb : IAsyncDisposable
         return ReadRow(reader);
     }
 
-    /// <summary>
-    /// Returns just the numbers and updated_at + state for every issue in a repo —
-    /// enough to decide what to re-score and what to archive.
-    /// </summary>
     public async Task<Dictionary<int, (string State, DateTimeOffset? LastScoredAt, DateTimeOffset GitHubUpdatedAt)>>
         GetSyncStateAsync(string repo, CancellationToken ct = default)
     {
@@ -138,27 +141,25 @@ public sealed class IssueDb : IAsyncDisposable
         return result;
     }
 
-    /// <summary>
-    /// Insert or update an issue's GitHub-derived fields. Does not touch score columns.
-    /// </summary>
     public async Task UpsertSummaryAsync(
         string repo,
         GitHubIssueSummary summary,
         bool hasLinkedPr,
-        bool isAssigned,
+        bool? isAssigned = null,
         CancellationToken ct = default)
     {
         await using var cmd = _connection.CreateCommand();
         cmd.CommandText = """
-            INSERT INTO issues (repo, number, title, url, labels, state, has_linked_pr, is_assigned, github_updated_at)
-            VALUES ($repo, $number, $title, $url, $labels, 'open', $hasLinkedPr, $isAssigned, $updatedAt)
+            INSERT INTO issues (repo, number, title, url, labels, state, has_linked_pr, has_assignees, assignees, github_updated_at)
+            VALUES ($repo, $number, $title, $url, $labels, 'open', $hasLinkedPr, $hasAssignees, $assignees, $updatedAt)
             ON CONFLICT(repo, number) DO UPDATE SET
               title             = excluded.title,
               url               = excluded.url,
               labels            = excluded.labels,
               state             = 'open',
               has_linked_pr     = excluded.has_linked_pr,
-              is_assigned       = excluded.is_assigned,
+              has_assignees     = excluded.has_assignees,
+              assignees         = excluded.assignees,
               github_updated_at = excluded.github_updated_at,
               closed_at         = NULL
             """;
@@ -168,14 +169,13 @@ public sealed class IssueDb : IAsyncDisposable
         cmd.Parameters.AddWithValue("$url", summary.Url);
         cmd.Parameters.AddWithValue("$labels", summary.Labels);
         cmd.Parameters.AddWithValue("$hasLinkedPr", hasLinkedPr ? 1 : 0);
-        cmd.Parameters.AddWithValue("$isAssigned", isAssigned ? 1 : 0);
+        var assigned = isAssigned ?? summary.HasAssignees;
+        cmd.Parameters.AddWithValue("$hasAssignees", (summary.HasAssignees || assigned) ? 1 : 0);
+        cmd.Parameters.AddWithValue("$assignees", summary.Assignees ?? string.Empty);
         cmd.Parameters.AddWithValue("$updatedAt", summary.UpdatedAt.ToString(DateFormat, CultureInfo.InvariantCulture));
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
-    /// <summary>
-    /// Write a fresh score for an issue.
-    /// </summary>
     public async Task SaveScoreAsync(
         string repo,
         IssueScore score,
@@ -243,7 +243,7 @@ public sealed class IssueDb : IAsyncDisposable
 
     public async Task<IReadOnlyList<IssueRow>> QueryReviewQueueAsync(string? repo, CancellationToken ct = default)
     {
-        var sql = "SELECT * FROM issues WHERE state = 'open' AND total IS NOT NULL AND has_linked_pr = 0 AND is_assigned = 0";
+        var sql = "SELECT * FROM issues WHERE state = 'open' AND total IS NOT NULL AND has_linked_pr = 0 AND has_assignees = 0";
         if (repo is not null) sql += " AND repo = $repo";
         sql += " ORDER BY total DESC, number DESC";
 
@@ -257,9 +257,6 @@ public sealed class IssueDb : IAsyncDisposable
         return rows;
     }
 
-    /// <summary>
-    /// Mark a set of issues as closed (i.e. they didn't appear in the latest open listing).
-    /// </summary>
     public async Task ArchiveClosedAsync(string repo, IReadOnlyCollection<int> closedNumbers, CancellationToken ct = default)
     {
         if (closedNumbers.Count == 0) return;
@@ -287,6 +284,7 @@ public sealed class IssueDb : IAsyncDisposable
         int limit,
         int? minTotal = null,
         string? labelContains = null,
+        bool excludeAssigned = false,
         CancellationToken ct = default)
     {
         var sql = "SELECT * FROM issues WHERE total IS NOT NULL";
@@ -294,7 +292,8 @@ public sealed class IssueDb : IAsyncDisposable
         if (repo is not null) sql += " AND repo = $repo";
         if (minTotal is not null) sql += " AND total >= $minTotal";
         if (labelContains is not null) sql += " AND labels LIKE $labelLike";
-        sql += " AND has_linked_pr = 0 AND is_assigned = 0 ORDER BY total DESC, number DESC LIMIT $limit";
+        if (excludeAssigned) sql += " AND has_assignees = 0";
+        sql += " AND has_linked_pr = 0 ORDER BY total DESC, number DESC LIMIT $limit";
 
         await using var cmd = _connection.CreateCommand();
         cmd.CommandText = sql;
@@ -338,13 +337,11 @@ public sealed class IssueDb : IAsyncDisposable
         return repos;
     }
 
-    public async ValueTask DisposeAsync()
-    {
-        await _connection.DisposeAsync();
-    }
+    public async ValueTask DisposeAsync() => await _connection.DisposeAsync();
 
     private static IssueRow ReadRow(SqliteDataReader r)
     {
+        var hasAssignees = r.GetInt32(r.GetOrdinal("has_assignees")) != 0;
         return new IssueRow
         {
             Repo = r.GetString(r.GetOrdinal("repo")),
@@ -354,7 +351,8 @@ public sealed class IssueDb : IAsyncDisposable
             Labels = r.GetString(r.GetOrdinal("labels")),
             State = r.GetString(r.GetOrdinal("state")),
             HasLinkedPr = r.GetInt32(r.GetOrdinal("has_linked_pr")) != 0,
-            IsAssigned = r.GetInt32(r.GetOrdinal("is_assigned")) != 0,
+            HasAssignees = hasAssignees,
+            Assignees = GetNullableString(r, "assignees") ?? string.Empty,
             GitHubUpdatedAt = ParseDate(r.GetString(r.GetOrdinal("github_updated_at"))),
             ClosedAt = GetNullableDate(r, "closed_at"),
             LastScoredAt = GetNullableDate(r, "last_scored_at"),
@@ -374,6 +372,28 @@ public sealed class IssueDb : IAsyncDisposable
 
     private static DateTimeOffset ParseDate(string s) =>
         DateTimeOffset.Parse(s, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind);
+
+    private async Task<bool> HasColumnAsync(string table, string column, CancellationToken ct)
+    {
+        await using var check = _connection.CreateCommand();
+        check.CommandText = $"PRAGMA table_info({table})";
+        await using var reader = await check.ExecuteReaderAsync(ct);
+        while (await reader.ReadAsync(ct))
+        {
+            if (string.Equals(reader.GetString(1), column, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
+    }
+
+    private async Task EnsureColumnAsync(string table, string column, string sqlType, CancellationToken ct)
+    {
+        if (await HasColumnAsync(table, column, ct)) return;
+
+        await using var alter = _connection.CreateCommand();
+        alter.CommandText = $"ALTER TABLE {table} ADD COLUMN {column} {sqlType}";
+        await alter.ExecuteNonQueryAsync(ct);
+    }
 
     private static DateTimeOffset? GetNullableDate(SqliteDataReader r, string name)
     {
