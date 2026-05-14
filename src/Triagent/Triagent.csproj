@@ -10,6 +10,15 @@
     <LangVersion>latest</LangVersion>
     <InvariantGlobalization>true</InvariantGlobalization>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>triagent</ToolCommandName>
+    <PackageId>Triagent</PackageId>
+    <Description>Score GitHub issues for AI-agent doability and keep the results in a local SQLite database so the analysis stays incremental.</Description>
+    <Authors>mentaldesk</Authors>
+    <PackageProjectUrl>https://github.com/mentaldesk/triagent</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/mentaldesk/triagent</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
   </PropertyGroup>
 
   <ItemGroup>
