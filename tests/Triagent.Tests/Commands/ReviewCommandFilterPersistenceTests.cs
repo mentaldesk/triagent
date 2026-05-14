@@ -8,6 +8,7 @@ using Xunit;
 
 namespace Triagent.Tests.Commands;
 
+[Collection("ConfigIsolation")]
 public sealed class ReviewCommandFilterPersistenceTests
 {
     [Fact]
