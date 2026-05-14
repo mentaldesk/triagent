@@ -1,5 +1,6 @@
 using System.CommandLine;
 using Sentry;
+using Sentry.Extensibility;
 using Spectre.Console;
 using Triagent.Commands;
 using Triagent.Config;
@@ -252,6 +253,7 @@ if (!string.IsNullOrWhiteSpace(sentryDsn))
         o.Release = release;
         o.Debug = sentryDebug;
         o.DiagnosticLevel = SentryLevel.Debug;
+        o.DiagnosticLogger = sentryDebug ? new StderrSentryDiagnosticLogger() : null;
         o.AutoSessionTracking = false;
     });
 
@@ -284,5 +286,18 @@ static async Task<int> InvokeRootAsync(ParseResult parseResult)
         tx.Finish(SpanStatus.InternalError);
         SentrySdk.CaptureException(ex);
         throw;
+    }
+}
+
+file sealed class StderrSentryDiagnosticLogger : IDiagnosticLogger
+{
+    public bool IsEnabled(SentryLevel level) => true;
+
+    public void Log(SentryLevel logLevel, string message, Exception? exception = null, params object?[] args)
+    {
+        var rendered = args.Length > 0 ? string.Format(message, args) : message;
+        Console.Error.WriteLine($"[sentry:{logLevel}] {rendered}");
+        if (exception is not null)
+            Console.Error.WriteLine(exception);
     }
 }
