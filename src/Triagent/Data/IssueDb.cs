@@ -286,6 +286,20 @@ public sealed class IssueDb : IAsyncDisposable
         return rows;
     }
 
+    public async Task<IssueRow?> GetNextIssueAsync(string? repo, CancellationToken ct = default)
+    {
+        var sql = "SELECT * FROM issues WHERE review_decision = 'try' AND state = 'open'";
+        if (repo is not null) sql += " AND repo = $repo";
+        sql += " ORDER BY total DESC, number DESC LIMIT 1";
+
+        await using var cmd = _connection.CreateCommand();
+        cmd.CommandText = sql;
+        if (repo is not null) cmd.Parameters.AddWithValue("$repo", repo);
+
+        await using var reader = await cmd.ExecuteReaderAsync(ct);
+        return await reader.ReadAsync(ct) ? ReadRow(reader) : null;
+    }
+
     public async Task ArchiveClosedAsync(string repo, IReadOnlyCollection<int> closedNumbers, CancellationToken ct = default)
     {
         if (closedNumbers.Count == 0) return;

@@ -88,4 +88,80 @@ public sealed class IssueDbReviewDecisionTests
             r => Assert.Equal(1, r.Number),
             r => Assert.Equal(3, r.Number));
     }
+
+    [Fact]
+    public async Task GetNextIssue_ReturnsNullWhenNoTryIssues()
+    {
+        await using var temp = new TempDb();
+        await using var db = await temp.OpenAsync();
+
+        await db.UpsertSummaryAsync(Repo, new GitHubIssueSummary(1, "A", "https://example/1", "", DateTimeOffset.UtcNow, IsAssigned: false), hasLinkedPr: false, isAssigned: false);
+        await db.SaveScoreAsync(Repo, new IssueScore(1, 3, 3, 3, 3, 3, "r"), "claude");
+
+        var result = await db.GetNextIssueAsync(Repo);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task GetNextIssue_ReturnsTryIssueWithHighestScore()
+    {
+        await using var temp = new TempDb();
+        await using var db = await temp.OpenAsync();
+
+        await db.UpsertSummaryAsync(Repo, new GitHubIssueSummary(1, "Low", "https://example/1", "", DateTimeOffset.UtcNow, IsAssigned: false), hasLinkedPr: false, isAssigned: false);
+        await db.UpsertSummaryAsync(Repo, new GitHubIssueSummary(2, "High", "https://example/2", "", DateTimeOffset.UtcNow, IsAssigned: false), hasLinkedPr: false, isAssigned: false);
+        await db.UpsertSummaryAsync(Repo, new GitHubIssueSummary(3, "Skip", "https://example/3", "", DateTimeOffset.UtcNow, IsAssigned: false), hasLinkedPr: false, isAssigned: false);
+
+        await db.SaveScoreAsync(Repo, new IssueScore(1, 2, 2, 2, 2, 2, "r"), "claude");
+        await db.SaveScoreAsync(Repo, new IssueScore(2, 4, 4, 4, 4, 4, "r"), "claude");
+        await db.SaveScoreAsync(Repo, new IssueScore(3, 5, 5, 5, 5, 5, "r"), "claude");
+
+        await db.SaveReviewDecisionAsync(Repo, 1, ReviewDecision.Try, null);
+        await db.SaveReviewDecisionAsync(Repo, 2, ReviewDecision.Try, null);
+        await db.SaveReviewDecisionAsync(Repo, 3, ReviewDecision.Skip, "too risky");
+
+        var result = await db.GetNextIssueAsync(Repo);
+
+        Assert.NotNull(result);
+        Assert.Equal(2, result!.Number);
+    }
+
+    [Fact]
+    public async Task GetNextIssue_IgnoresClosedTryIssues()
+    {
+        await using var temp = new TempDb();
+        await using var db = await temp.OpenAsync();
+
+        await db.UpsertSummaryAsync(Repo, new GitHubIssueSummary(1, "A", "https://example/1", "", DateTimeOffset.UtcNow, IsAssigned: false), hasLinkedPr: false, isAssigned: false);
+        await db.SaveScoreAsync(Repo, new IssueScore(1, 3, 3, 3, 3, 3, "r"), "claude");
+        await db.SaveReviewDecisionAsync(Repo, 1, ReviewDecision.Try, null);
+        await db.ArchiveClosedAsync(Repo, new[] { 1 });
+
+        var result = await db.GetNextIssueAsync(Repo);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public async Task GetNextIssue_RespectsRepoFilter()
+    {
+        await using var temp = new TempDb();
+        await using var db = await temp.OpenAsync();
+
+        const string otherRepo = "other/repo";
+        await db.UpsertSummaryAsync(Repo, new GitHubIssueSummary(1, "A", "https://example/1", "", DateTimeOffset.UtcNow, IsAssigned: false), hasLinkedPr: false, isAssigned: false);
+        await db.UpsertSummaryAsync(otherRepo, new GitHubIssueSummary(2, "B", "https://example/2", "", DateTimeOffset.UtcNow, IsAssigned: false), hasLinkedPr: false, isAssigned: false);
+
+        await db.SaveScoreAsync(Repo, new IssueScore(1, 3, 3, 3, 3, 3, "r"), "claude");
+        await db.SaveScoreAsync(otherRepo, new IssueScore(2, 3, 3, 3, 3, 3, "r"), "claude");
+
+        await db.SaveReviewDecisionAsync(Repo, 1, ReviewDecision.Try, null);
+        await db.SaveReviewDecisionAsync(otherRepo, 2, ReviewDecision.Try, null);
+
+        var result = await db.GetNextIssueAsync(otherRepo);
+
+        Assert.NotNull(result);
+        Assert.Equal(2, result!.Number);
+    }
 }

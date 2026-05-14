@@ -227,6 +227,18 @@ linkedReposCommand.Add(linkedSet);
 linkedReposCommand.Add(linkedAdd);
 linkedReposCommand.Add(linkedRemove);
 
+// ---- next-issue ----
+var nextIssueCommand = new Command("next-issue", "Print the number of the next Try issue to work on, or 0 if none.");
+var nextIssueRepoOpt = new Option<string?>("--repo") { Description = "Filter to a single repo (defaults to config.defaultRepo)." };
+nextIssueCommand.Add(nextIssueRepoOpt);
+nextIssueCommand.SetAction(async (parseResult, ct) =>
+{
+    var dbOverride = parseResult.GetValue(dbOption);
+    if (dbOverride is not null) config.DbPath = dbOverride;
+    var repo = parseResult.GetValue(nextIssueRepoOpt) ?? config.DefaultRepo;
+    return await NextIssueCommand.RunAsync(repo, config, ct);
+});
+
 root.Add(analyzeCommand);
 root.Add(topCommand);
 root.Add(showCommand);
@@ -235,6 +247,7 @@ root.Add(exportCommand);
 root.Add(reposCommand);
 root.Add(reviewCommand);
 root.Add(linkedReposCommand);
+root.Add(nextIssueCommand);
 
 var parseResult = root.Parse(args);
 
