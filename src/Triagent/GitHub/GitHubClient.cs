@@ -77,9 +77,17 @@ public sealed class GitHubClient
         string owner,
         string repo,
         IReadOnlyCollection<int> issueNumbers,
+        IReadOnlyCollection<string>? linkedRepoScope = null,
         CancellationToken ct = default)
     {
         var linked = new HashSet<int>();
+        var allowedRepos = (linkedRepoScope ?? Array.Empty<string>())
+            .Where(r => !string.IsNullOrWhiteSpace(r))
+            .Select(r => r.Trim())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        if (allowedRepos.Count == 0)
+            allowedRepos.Add($"{owner}/{repo}");
 
         foreach (var issueNumber in issueNumbers)
         {
@@ -89,7 +97,11 @@ public sealed class GitHubClient
             {
                 if (ev.Event != EventInfoState.Crossreferenced) continue;
                 if (ev.Source?.Issue?.PullRequest is null) continue;
-                if (ev.Source.Issue.State == ItemState.Open)
+                if (ev.Source.Issue.State != ItemState.Open) continue;
+
+                var sourceRepo = TryGetOwnerRepoFromIssueApiUrl(ev.Source.Issue.Url);
+
+                if (sourceRepo is not null && allowedRepos.Contains(sourceRepo))
                 {
                     linked.Add(issueNumber);
                     break;
@@ -98,5 +110,22 @@ public sealed class GitHubClient
         }
 
         return linked;
+    }
+
+    private static string? TryGetOwnerRepoFromIssueApiUrl(string? issueApiUrl)
+    {
+        if (string.IsNullOrWhiteSpace(issueApiUrl)) return null;
+        if (!Uri.TryCreate(issueApiUrl, UriKind.Absolute, out var uri)) return null;
+
+        var segments = uri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        // Expected: repos/{owner}/{repo}/issues/{number}
+        if (segments.Length < 4) return null;
+        if (!string.Equals(segments[0], "repos", StringComparison.OrdinalIgnoreCase)) return null;
+
+        var owner = segments[1];
+        var repo = segments[2];
+        if (string.IsNullOrWhiteSpace(owner) || string.IsNullOrWhiteSpace(repo)) return null;
+
+        return $"{owner}/{repo}";
     }
 }

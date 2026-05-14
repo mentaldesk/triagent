@@ -43,9 +43,13 @@ public static class AnalyzeCommand
             .StartAsync("Listing open issues...", _ => gh.GetAllOpenIssuesAsync(owner, repo, ct));
         AnsiConsole.MarkupLine($"  Found [cyan]{openIssues.Count}[/] open issues");
 
+        var linkedRepoScope = await ResolveLinkedRepoScopeAsync(ownerRepo, config, db, ct);
+        if (linkedRepoScope.Count > 0)
+            AnsiConsole.MarkupLine($"  Linked PR repo scope: [grey]{string.Join(", ", linkedRepoScope)}[/]");
+
         var linkedToOpenPrs = await AnsiConsole.Status()
             .StartAsync("Checking issue timeline for associated open PRs...",
-                _ => gh.GetIssuesLinkedToOpenPullRequestsAsync(owner, repo, openIssues.Select(i => i.Number).ToList(), ct));
+                _ => gh.GetIssuesLinkedToOpenPullRequestsAsync(owner, repo, openIssues.Select(i => i.Number).ToList(), linkedRepoScope, ct));
         AnsiConsole.MarkupLine($"  [cyan]{linkedToOpenPrs.Count}[/] issues linked from open PRs");
 
         // Snapshot current DB state for sync decisions
@@ -142,6 +146,40 @@ public static class AnalyzeCommand
 
         AnsiConsole.MarkupLine($"[green]Done.[/] scored=[cyan]{scored}[/] failed=[red]{failed}[/] unchanged=[grey]{skippedUnchanged}[/] pr-linked=[grey]{skippedPrLinked}[/] newly-closed=[yellow]{newlyClosed.Count}[/]");
         return failed == 0 ? 0 : 1;
+    }
+
+    private static async Task<IReadOnlyList<string>> ResolveLinkedRepoScopeAsync(
+        string ownerRepo,
+        TriagentConfig config,
+        IssueDb db,
+        CancellationToken ct)
+    {
+        var dbScoped = await db.GetLinkedPrReposAsync(ownerRepo, ct);
+        if (dbScoped.Count > 0)
+            return BuildLinkedRepoScope(ownerRepo, dbScoped);
+
+        if (config.LinkedPrRepos.Count > 0)
+        {
+            await db.SetLinkedPrReposAsync(ownerRepo, config.LinkedPrRepos, ct);
+            return BuildLinkedRepoScope(ownerRepo, config.LinkedPrRepos);
+        }
+
+        return BuildLinkedRepoScope(ownerRepo, Array.Empty<string>());
+    }
+
+    private static IReadOnlyList<string> BuildLinkedRepoScope(string ownerRepo, IReadOnlyCollection<string> configuredLinkedRepos)
+    {
+        var scope = new List<string> { ownerRepo };
+        foreach (var linked in configuredLinkedRepos)
+        {
+            if (string.IsNullOrWhiteSpace(linked)) continue;
+            var trimmed = linked.Trim();
+            if (scope.Any(existing => string.Equals(existing, trimmed, StringComparison.OrdinalIgnoreCase)))
+                continue;
+            scope.Add(trimmed);
+        }
+
+        return scope;
     }
 
     private static bool NeedsScoring(

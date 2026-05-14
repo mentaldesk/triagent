@@ -119,9 +119,15 @@ analyze --repo <owner/name> [--scorer claude|codex] [--force] [--batch-size 5]
    never delete rows — history is preserved for stats and re-analysis.
 3. **Detect PR linkage.** For each open issue, check whether a PR references it
    (closes/fixes/resolves keyword in an open PR body, OR a `cross-referenced` event
-   from a PR on the issue timeline). Triagent scans the analyzed repo plus any
-   configured `linkedPrRepos` (owner/name values) for these references. If linked,
-   set `has_linked_pr=1` and skip scoring. Surface count in the run summary.
+   from a PR on the issue timeline). Triagent scans only an allowed repo scope:
+   - the analyzed repo itself, plus
+   - repo-scoped linked repos persisted in local DB (`repo_settings.linked_pr_repos`).
+
+   Backward compatibility: when no repo-scoped mapping exists yet for a target
+   repo, Triagent falls back to global `linkedPrRepos` config, then persists that
+   value as the repo-scoped mapping for future runs.
+
+   If linked, set `has_linked_pr=1` and skip scoring. Surface count in the run summary.
 4. **Decide what to score.** An issue needs scoring when:
    - It is not yet in the DB, OR
    - `github_updated_at > last_scored_at`, OR
@@ -168,7 +174,15 @@ Default `--repo` can be set in a config file so day-to-day commands don't need i
 }
 ```
 
-Any setting can be overridden via CLI flags (except `linkedPrRepos`, which is currently config-only).
+`linkedPrRepos` remains supported as a compatibility fallback/seed value. Effective
+linked-repo mapping is stored per analyzed target repo in the local DB.
+
+Example effective mapping:
+
+- `getsentry/sentry-dotnet` -> [`getsentry/sentry-docs`]
+- `owner/other-repo` -> []
+
+Any setting can be overridden via CLI flags (except linked repo mapping, which is currently persisted and resolved automatically as described above).
 
 ## Project layout
 
