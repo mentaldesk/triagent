@@ -9,6 +9,18 @@ See [DESIGN.md](DESIGN.md) for the full design.
 
 Early scaffolding. Not yet usable.
 
+## Dev launcher
+
+Use `./dev.cs` from the repo root as a shorthand for:
+
+- `dotnet run --project src/Triagent/Triagent.csproj -- ...`
+
+Examples:
+
+- `./dev.cs analyze getsentry/sentry-dotnet`
+- `./dev.cs review`
+- `./dev.cs top 20 --state all`
+
 ## Linked PR repo scope
 
 Linked PR repo mappings are stored per analyzed target repo in the local DB.
