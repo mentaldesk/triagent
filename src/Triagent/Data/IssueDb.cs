@@ -288,7 +288,7 @@ public sealed class IssueDb : IAsyncDisposable
 
     public async Task<IssueRow?> GetNextIssueAsync(string? repo, CancellationToken ct = default)
     {
-        var sql = "SELECT * FROM issues WHERE review_decision = 'try' AND state = 'open'";
+        var sql = "SELECT * FROM issues WHERE review_decision = 'try' AND state = 'open' AND has_linked_pr = 0 AND has_assignees = 0";
         if (repo is not null) sql += " AND repo = $repo";
         sql += " ORDER BY total DESC, number DESC LIMIT 1";
 
