@@ -144,6 +144,48 @@ public sealed class IssueDbReviewDecisionTests
     }
 
     [Fact]
+    public async Task GetNextIssue_IgnoresIssuesWithLinkedPr()
+    {
+        await using var temp = new TempDb();
+        await using var db = await temp.OpenAsync();
+
+        await db.UpsertSummaryAsync(Repo, new GitHubIssueSummary(1, "Has PR", "https://example/1", "", DateTimeOffset.UtcNow, IsAssigned: false), hasLinkedPr: true, isAssigned: false);
+        await db.UpsertSummaryAsync(Repo, new GitHubIssueSummary(2, "No PR", "https://example/2", "", DateTimeOffset.UtcNow, IsAssigned: false), hasLinkedPr: false, isAssigned: false);
+
+        await db.SaveScoreAsync(Repo, new IssueScore(1, 5, 5, 5, 5, 5, "r"), "claude");
+        await db.SaveScoreAsync(Repo, new IssueScore(2, 3, 3, 3, 3, 3, "r"), "claude");
+
+        await db.SaveReviewDecisionAsync(Repo, 1, ReviewDecision.Try, null);
+        await db.SaveReviewDecisionAsync(Repo, 2, ReviewDecision.Try, null);
+
+        var result = await db.GetNextIssueAsync(Repo);
+
+        Assert.NotNull(result);
+        Assert.Equal(2, result!.Number);
+    }
+
+    [Fact]
+    public async Task GetNextIssue_IgnoresAssignedIssues()
+    {
+        await using var temp = new TempDb();
+        await using var db = await temp.OpenAsync();
+
+        await db.UpsertSummaryAsync(Repo, new GitHubIssueSummary(1, "Assigned", "https://example/1", "", DateTimeOffset.UtcNow, IsAssigned: true), hasLinkedPr: false, isAssigned: true);
+        await db.UpsertSummaryAsync(Repo, new GitHubIssueSummary(2, "Unassigned", "https://example/2", "", DateTimeOffset.UtcNow, IsAssigned: false), hasLinkedPr: false, isAssigned: false);
+
+        await db.SaveScoreAsync(Repo, new IssueScore(1, 5, 5, 5, 5, 5, "r"), "claude");
+        await db.SaveScoreAsync(Repo, new IssueScore(2, 3, 3, 3, 3, 3, "r"), "claude");
+
+        await db.SaveReviewDecisionAsync(Repo, 1, ReviewDecision.Try, null);
+        await db.SaveReviewDecisionAsync(Repo, 2, ReviewDecision.Try, null);
+
+        var result = await db.GetNextIssueAsync(Repo);
+
+        Assert.NotNull(result);
+        Assert.Equal(2, result!.Number);
+    }
+
+    [Fact]
     public async Task GetNextIssue_RespectsRepoFilter()
     {
         await using var temp = new TempDb();
