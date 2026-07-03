@@ -1,0 +1,15 @@
+<Project>
+
+  <!-- Solution-wide NuGet audit suppressions.
+
+       GHSA-2m69-gcr7-jv3q: SQLitePCLRaw.lib.e_sqlite3 (pulled in transitively via
+       Microsoft.Data.Sqlite) bundles a SQLite build with a known CVE. The advisory
+       covers all published versions (<= 2.1.11) with no patched release available
+       upstream, so it cannot be resolved by a version bump. Triagent only opens its
+       own local SQLite file, so exposure is low. Remove this suppression once
+       SQLitePCLRaw ships a build with a patched SQLite. -->
+  <ItemGroup>
+    <NuGetAuditSuppress Include="https://github.com/advisories/GHSA-2m69-gcr7-jv3q" />
+  </ItemGroup>
+
+</Project>
