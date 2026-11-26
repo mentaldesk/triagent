@@ -206,4 +206,30 @@ public sealed class IssueDbReviewDecisionTests
         Assert.NotNull(result);
         Assert.Equal(2, result!.Number);
     }
+
+    [Fact]
+    public async Task QueryTryIssues_ReturnsEveryEligibleTryIssue_OrderedByScore()
+    {
+        await using var temp = new TempDb();
+        await using var db = await temp.OpenAsync();
+
+        await db.UpsertSummaryAsync(Repo, new GitHubIssueSummary(1, "Low", "https://example/1", "", DateTimeOffset.UtcNow, IsAssigned: false), hasLinkedPr: false, isAssigned: false);
+        await db.UpsertSummaryAsync(Repo, new GitHubIssueSummary(2, "High", "https://example/2", "", DateTimeOffset.UtcNow, IsAssigned: false), hasLinkedPr: false, isAssigned: false);
+        await db.UpsertSummaryAsync(Repo, new GitHubIssueSummary(3, "Skipped", "https://example/3", "", DateTimeOffset.UtcNow, IsAssigned: false), hasLinkedPr: false, isAssigned: false);
+        await db.UpsertSummaryAsync(Repo, new GitHubIssueSummary(4, "Has PR", "https://example/4", "", DateTimeOffset.UtcNow, IsAssigned: false), hasLinkedPr: true, isAssigned: false);
+
+        await db.SaveScoreAsync(Repo, new IssueScore(1, 2, 2, 2, 2, 2, "r"), "claude");
+        await db.SaveScoreAsync(Repo, new IssueScore(2, 4, 4, 4, 4, 4, "r"), "claude");
+        await db.SaveScoreAsync(Repo, new IssueScore(3, 5, 5, 5, 5, 5, "r"), "claude");
+        await db.SaveScoreAsync(Repo, new IssueScore(4, 5, 5, 5, 5, 5, "r"), "claude");
+
+        await db.SaveReviewDecisionAsync(Repo, 1, ReviewDecision.Try, null);
+        await db.SaveReviewDecisionAsync(Repo, 2, ReviewDecision.Try, null);
+        await db.SaveReviewDecisionAsync(Repo, 3, ReviewDecision.Skip, "too risky");
+        await db.SaveReviewDecisionAsync(Repo, 4, ReviewDecision.Try, null);
+
+        var rows = await db.QueryTryIssuesAsync(Repo);
+
+        Assert.Equal([2, 1], rows.Select(r => r.Number));
+    }
 }

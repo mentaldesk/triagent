@@ -230,13 +230,17 @@ linkedReposCommand.Add(linkedRemove);
 // ---- next-issue ----
 var nextIssueCommand = new Command("next-issue", "Print the number of the next Try issue to work on, or 0 if none.");
 var nextIssueRepoOpt = new Option<string?>("--repo") { Description = "Filter to a single repo (defaults to config.defaultRepo)." };
+var nextIssueAllOpt = new Option<bool>("--all") { Description = "Print every Try issue, one number per line, instead of just the next one." };
+var nextIssueJsonOpt = new Option<bool>("--json") { Description = "Print the issue rows as a JSON array." };
 nextIssueCommand.Add(nextIssueRepoOpt);
+nextIssueCommand.Add(nextIssueAllOpt);
+nextIssueCommand.Add(nextIssueJsonOpt);
 nextIssueCommand.SetAction(async (parseResult, ct) =>
 {
     var dbOverride = parseResult.GetValue(dbOption);
     if (dbOverride is not null) config.DbPath = dbOverride;
     var repo = parseResult.GetValue(nextIssueRepoOpt) ?? config.DefaultRepo;
-    return await NextIssueCommand.RunAsync(repo, config, ct);
+    return await NextIssueCommand.RunAsync(repo, parseResult.GetValue(nextIssueAllOpt), parseResult.GetValue(nextIssueJsonOpt), config, ct);
 });
 
 root.Add(analyzeCommand);

@@ -106,3 +106,11 @@ You can also enable debug logging via env var:
 - `--exclude-assigned` to hide issues with one or more current GitHub assignees
 
 By default, assigned issues are still included unless `--exclude-assigned` is passed.
+
+## Picking issues for agents
+
+`triagent next-issue` prints the number of the highest-scoring open issue you marked
+Try in `triagent review` that has no linked PR or assignee, or `0` if there is none.
+
+- `--all` prints every such issue, one number per line, so you can start one agent per issue
+- `--json` prints the full issue rows (title, URL, scores, rationale) as a JSON array

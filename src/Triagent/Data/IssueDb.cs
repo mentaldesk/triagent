@@ -286,18 +286,25 @@ public sealed class IssueDb : IAsyncDisposable
         return rows;
     }
 
-    public async Task<IssueRow?> GetNextIssueAsync(string? repo, CancellationToken ct = default)
+    public async Task<IssueRow?> GetNextIssueAsync(string? repo, CancellationToken ct = default) =>
+        (await QueryTryIssuesAsync(repo, limit: 1, ct)).FirstOrDefault();
+
+    public async Task<IReadOnlyList<IssueRow>> QueryTryIssuesAsync(string? repo, int? limit = null, CancellationToken ct = default)
     {
         var sql = "SELECT * FROM issues WHERE review_decision = 'try' AND state = 'open' AND has_linked_pr = 0 AND has_assignees = 0";
         if (repo is not null) sql += " AND repo = $repo";
-        sql += " ORDER BY total DESC, number DESC LIMIT 1";
+        sql += " ORDER BY total DESC, number DESC";
+        if (limit is not null) sql += " LIMIT $limit";
 
         await using var cmd = _connection.CreateCommand();
         cmd.CommandText = sql;
         if (repo is not null) cmd.Parameters.AddWithValue("$repo", repo);
+        if (limit is not null) cmd.Parameters.AddWithValue("$limit", limit.Value);
 
+        var rows = new List<IssueRow>();
         await using var reader = await cmd.ExecuteReaderAsync(ct);
-        return await reader.ReadAsync(ct) ? ReadRow(reader) : null;
+        while (await reader.ReadAsync(ct)) rows.Add(ReadRow(reader));
+        return rows;
     }
 
     public async Task ArchiveClosedAsync(string repo, IReadOnlyCollection<int> closedNumbers, CancellationToken ct = default)
